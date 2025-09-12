@@ -1,5 +1,6 @@
 import { authenticateSocket } from '../middleware/auth.js';
 import User from '../models/User.js';
+import Message from '../models/Message.js';
 import { 
     generateRoomId, 
     tunnelEncrypt, 
@@ -31,7 +32,11 @@ function initializeSocket(io) {
             });
 
             // Update user online status in database
-            await user.setOnlineStatus(true, socket.id);
+            await User.findByIdAndUpdate(user._id, { 
+                isOnline: true, 
+                socketId: socket.id,
+                lastSeen: new Date()
+            });
 
             // Notify user of successful connection
             socket.emit('connection_established', {
@@ -47,26 +52,84 @@ function initializeSocket(io) {
             socket.on('join_room', async (data) => {
                 try {
                     const { targetUserId } = data;
-                    
+
                     if (!targetUserId) {
                         socket.emit('error', { message: 'Target user ID is required' });
                         return;
                     }
 
+                    // Check if target user is a friend
+                    if (!user.friends.includes(targetUserId)) {
+                        socket.emit('error', { message: 'You can only chat with your friends' });
+                        return;
+                    }
+
+                    // Check if target user is online
+                    const targetUser = await User.findById(targetUserId);
+                    if (!targetUser || !targetUser.isOnline) {
+                        socket.emit('error', { message: 'User is not online' });
+                        return;
+                    }
+
                     // Generate secure room ID
                     const roomId = generateRoomId(user._id.toString(), targetUserId);
-                    
+
                     // Join the room
                     socket.join(roomId);
-                    
-                    console.log(`User ${user.username} joined room: ${roomId}`);
-                    
-                    socket.emit('room_joined', {
-                        success: true,
-                        roomId,
-                        message: 'Joined secure tunnel',
-                        participants: [user._id.toString(), targetUserId]
-                    });
+
+                    // Load previous messages for this room with pagination
+                    try {
+                        const previousMessages = await Message.getRoomMessages(roomId, {
+                            limit: 50,
+                            includeSystem: true
+                        });
+
+                        socket.emit('room_joined', {
+                            success: true,
+                            roomId,
+                            message: 'Joined secure tunnel',
+                            participants: [user._id.toString(), targetUserId],
+                            previousMessages: previousMessages.map(msg => ({
+                                id: msg._id.toString(),
+                                content: msg.encryptedContent, // Send encrypted content
+                                messageType: msg.messageType,
+                                sender: {
+                                    userId: msg.sender.userId.toString(),
+                                    username: msg.sender.username
+                                },
+                                recipient: {
+                                    userId: msg.recipient.userId.toString(),
+                                    username: msg.recipient.username
+                                },
+                                roomId: msg.roomId,
+                                status: msg.status,
+                                deliveryStatus: msg.deliveryStatus,
+                                metadata: msg.metadata,
+                                encryptionMetadata: msg.encryptionMetadata,
+                                createdAt: msg.createdAt,
+                                updatedAt: msg.updatedAt
+                            }))
+                        });
+
+                        // Mark messages as delivered
+                        const messageIds = previousMessages
+                            .filter(msg => msg.recipient.userId.toString() === user._id.toString() && msg.status === 'sent')
+                            .map(msg => msg._id);
+
+                        if (messageIds.length > 0) {
+                            await Message.markAsDelivered(messageIds, user._id);
+                        }
+
+                    } catch (error) {
+                        console.error('Error loading previous messages:', error);
+                        socket.emit('room_joined', {
+                            success: true,
+                            roomId,
+                            message: 'Joined secure tunnel',
+                            participants: [user._id.toString(), targetUserId],
+                            previousMessages: []
+                        });
+                    }
 
                 } catch (error) {
                     console.error('Join room error:', error);
@@ -74,65 +137,128 @@ function initializeSocket(io) {
                 }
             });
 
-            // Handle private messages
+            // Handle private messages (roomId is now optional / auto-corrected)
             socket.on('private_message', async (data) => {
+                console.log('Incoming private_message payload:', {
+                    targetUserId: data?.targetUserId,
+                    hasMessage: !!data?.message,
+                    roomId: data?.roomId,
+                    replyTo: data?.replyTo
+                });
                 try {
-                    const { targetUserId, message, roomId } = data;
-                    
+                    const { targetUserId, message, roomId: clientRoomId, replyTo = null } = data;
+
                     if (!targetUserId || !message) {
                         socket.emit('error', { message: 'Target user ID and message are required' });
                         return;
                     }
 
-                    // Verify room ID matches expected room for these users
-                    const expectedRoomId = generateRoomId(user._id.toString(), targetUserId);
-                    if (roomId !== expectedRoomId) {
-                        socket.emit('error', { message: 'Invalid room ID' });
+                    // Check friendship
+                    if (!user.friends.includes(targetUserId)) {
+                        socket.emit('error', { message: 'You can only send messages to your friends' });
                         return;
                     }
 
-                    // Encrypt message using tunnel encryption
+                    // Fetch target user
+                    const targetUser = await User.findById(targetUserId);
+                    if (!targetUser || !targetUser.isOnline) {
+                        socket.emit('error', { message: 'User is not online' });
+                        return;
+                    }
+
+                    // Compute expected room ID
+                    const expectedRoomId = generateRoomId(user._id.toString(), targetUserId);
+                    const finalRoomId = expectedRoomId; // we enforce server-side authority
+
+                    // If client supplied mismatching room, log but continue
+                    if (clientRoomId && clientRoomId !== expectedRoomId) {
+                        console.warn(`Room ID mismatch from client. Provided=${clientRoomId} Expected=${expectedRoomId}. Using expected.`);
+                    }
+
+                    // Ensure sender socket is in the room (auto-join if necessary)
+                    if (![...socket.rooms].includes(finalRoomId)) {
+                        socket.join(finalRoomId);
+                    }
+
+                    // Also ensure target is in the room (if connected) for delivery
+                    const targetConnection = activeConnections.get(targetUserId.toString());
+                    if (targetConnection) {
+                        const targetSocket = io.sockets.sockets.get(targetConnection.socketId);
+                        if (targetSocket && ![...targetSocket.rooms].includes(finalRoomId)) {
+                            targetSocket.join(finalRoomId);
+                        }
+                    }
+
+                    // Encrypt message
                     const encryptionResult = tunnelEncrypt(message, user._id.toString(), targetUserId);
-                    
                     if (!encryptionResult.success) {
                         socket.emit('error', { message: 'Failed to encrypt message' });
                         return;
                     }
 
                     const messageData = {
-                        id: Date.now().toString(),
-                        senderId: user._id.toString(),
-                        senderUsername: user.username,
-                        targetUserId,
-                        message: encryptionResult.encrypted,
-                        roomId,
-                        timestamp: new Date().toISOString(),
-                        encrypted: true,
-                        tunnelMetadata: encryptionResult.metadata
+                        content: message,
+                        messageType: 'text',
+                        encryptedContent: encryptionResult.encrypted,
+                        encryptionMetadata: {
+                            ...encryptionResult.metadata,
+                            encryptedAt: new Date()
+                        },
+                        sender: { userId: user._id, username: user.username },
+                        recipient: { userId: targetUserId, username: targetUser.username },
+                        roomId: finalRoomId,
+                        status: 'sent',
+                        deliveryStatus: { sentAt: new Date() },
+                        metadata: {
+                            replyTo,
+                            characterCount: message.length,
+                            wordCount: message.split(/\s+/).filter(w => w.length > 0).length
+                        },
+                        security: { encryptionVersion: '1.0' }
                     };
 
-                    // Send encrypted message to room
-                    io.to(roomId).emit('new_message', messageData);
-                    
-                    console.log(`Encrypted message sent from ${user.username} in room ${roomId}`);
+                    try {
+                        const newMessage = new Message(messageData);
+                        await newMessage.save();
+                        console.log(`Message saved to database: ${newMessage._id}`);
 
+                        const messageToSend = {
+                            id: newMessage._id.toString(),
+                            content: newMessage.encryptedContent,
+                            messageType: newMessage.messageType,
+                            sender: newMessage.sender,
+                            recipient: newMessage.recipient,
+                            roomId: newMessage.roomId,
+                            status: newMessage.status,
+                            deliveryStatus: newMessage.deliveryStatus,
+                            metadata: newMessage.metadata,
+                            encryptionMetadata: newMessage.encryptionMetadata,
+                            createdAt: newMessage.createdAt
+                        };
+
+                        io.to(finalRoomId).emit('new_message', messageToSend);
+                        console.log(`Encrypted message sent from ${user.username} in room ${finalRoomId}`);
+                    } catch (saveError) {
+                        console.error('Error saving message to database:', saveError);
+                        socket.emit('error', { message: 'Failed to save message' });
+                    }
                 } catch (error) {
                     console.error('Private message error:', error);
                     socket.emit('error', { message: 'Failed to send message' });
                 }
             });
 
-            // Handle message decryption requests
+                        // Handle message decryption requests
             socket.on('decrypt_message', async (data) => {
                 try {
-                    const { encryptedMessage, senderId, targetUserId } = data;
-                    
-                    if (!encryptedMessage || !senderId || !targetUserId) {
+                    const { messageId, encryptedContent, senderId, targetUserId } = data;
+
+                    if (!encryptedContent || !senderId || !targetUserId) {
                         socket.emit('error', { message: 'Missing required decryption parameters' });
                         return;
                     }
 
-                    // Verify user is authorized to decrypt (must be sender or target)
+                    // Verify user is authorized to decrypt (must be sender or recipient)
                     const currentUserId = user._id.toString();
                     if (currentUserId !== senderId && currentUserId !== targetUserId) {
                         socket.emit('error', { message: 'Unauthorized decryption attempt' });
@@ -140,17 +266,30 @@ function initializeSocket(io) {
                     }
 
                     // Decrypt message using tunnel decryption
-                    const decryptionResult = tunnelDecrypt(encryptedMessage, senderId, targetUserId);
-                    
+                    const decryptionResult = tunnelDecrypt(encryptedContent, senderId, targetUserId);
+
                     if (!decryptionResult.success) {
                         socket.emit('error', { message: 'Failed to decrypt message' });
                         return;
                     }
 
+                    // If messageId is provided, update delivery status
+                    if (messageId && currentUserId === targetUserId) {
+                        try {
+                            await Message.findByIdAndUpdate(messageId, {
+                                status: 'read',
+                                'deliveryStatus.readAt': new Date()
+                            });
+                        } catch (updateError) {
+                            console.warn('Failed to update message read status:', updateError);
+                        }
+                    }
+
                     socket.emit('message_decrypted', {
                         success: true,
-                        decryptedMessage: decryptionResult.decrypted,
-                        tunnelMetadata: decryptionResult.metadata
+                        messageId,
+                        decryptedContent: decryptionResult.decrypted,
+                        encryptionMetadata: decryptionResult.metadata
                     });
 
                 } catch (error) {
@@ -182,6 +321,215 @@ function initializeSocket(io) {
                 }
             });
 
+            // Handle marking messages as read
+            socket.on('mark_messages_read', async (data) => {
+                try {
+                    const { messageIds, roomId } = data;
+
+                    if (!messageIds || !Array.isArray(messageIds)) {
+                        socket.emit('error', { message: 'Message IDs array is required' });
+                        return;
+                    }
+
+                    // Mark messages as read
+                    const result = await Message.markAsRead(messageIds, user._id);
+
+                    // Notify sender that messages were read
+                    if (result.modifiedCount > 0 && roomId) {
+                        socket.to(roomId).emit('messages_read', {
+                            messageIds,
+                            readBy: user._id.toString(),
+                            readAt: new Date()
+                        });
+                    }
+
+                    socket.emit('messages_marked_read', {
+                        success: true,
+                        count: result.modifiedCount
+                    });
+
+                } catch (error) {
+                    console.error('Mark messages read error:', error);
+                    socket.emit('error', { message: 'Failed to mark messages as read' });
+                }
+            });
+
+            // Handle editing messages
+            socket.on('edit_message', async (data) => {
+                try {
+                    const { messageId, newContent, roomId } = data;
+
+                    if (!messageId || !newContent) {
+                        socket.emit('error', { message: 'Message ID and new content are required' });
+                        return;
+                    }
+
+                    // Edit the message
+                    const result = await Message.editMessage(messageId, user._id, newContent);
+
+                    if (result.modifiedCount === 0) {
+                        socket.emit('error', { message: 'Message not found or cannot be edited' });
+                        return;
+                    }
+
+                    // Get the updated message
+                    const updatedMessage = await Message.findById(messageId);
+
+                    // Encrypt the new content
+                    const encryptionResult = tunnelEncrypt(newContent, user._id.toString(), updatedMessage.recipient.userId.toString());
+
+                    // Update encrypted content
+                    updatedMessage.encryptedContent = encryptionResult.encrypted;
+                    updatedMessage.encryptionMetadata = {
+                        ...encryptionResult.metadata,
+                        encryptedAt: new Date()
+                    };
+                    await updatedMessage.save();
+
+                    // Notify room about the edit
+                    const messageToSend = {
+                        id: updatedMessage._id.toString(),
+                        content: updatedMessage.encryptedContent,
+                        messageType: updatedMessage.messageType,
+                        sender: updatedMessage.sender,
+                        recipient: updatedMessage.recipient,
+                        roomId: updatedMessage.roomId,
+                        status: updatedMessage.status,
+                        metadata: {
+                            ...updatedMessage.metadata,
+                            edited: true,
+                            editedAt: new Date()
+                        },
+                        encryptionMetadata: updatedMessage.encryptionMetadata,
+                        createdAt: updatedMessage.createdAt,
+                        updatedAt: updatedMessage.updatedAt
+                    };
+
+                    io.to(roomId).emit('message_edited', messageToSend);
+
+                    socket.emit('message_edited_success', {
+                        success: true,
+                        messageId
+                    });
+
+                } catch (error) {
+                    console.error('Edit message error:', error);
+                    socket.emit('error', { message: 'Failed to edit message' });
+                }
+            });
+
+            // Handle deleting messages
+            socket.on('delete_message', async (data) => {
+                try {
+                    const { messageId, roomId } = data;
+
+                    if (!messageId) {
+                        socket.emit('error', { message: 'Message ID is required' });
+                        return;
+                    }
+
+                    // Delete the message
+                    const result = await Message.deleteMessage(messageId, user._id);
+
+                    if (result.modifiedCount === 0) {
+                        socket.emit('error', { message: 'Message not found or cannot be deleted' });
+                        return;
+                    }
+
+                    // Notify room about the deletion
+                    io.to(roomId).emit('message_deleted', {
+                        messageId,
+                        deletedBy: user._id.toString(),
+                        deletedAt: new Date()
+                    });
+
+                    socket.emit('message_deleted_success', {
+                        success: true,
+                        messageId
+                    });
+
+                } catch (error) {
+                    console.error('Delete message error:', error);
+                    socket.emit('error', { message: 'Failed to delete message' });
+                }
+            });
+
+            // Handle message search
+            socket.on('search_messages', async (data) => {
+                try {
+                    const { query, roomId, limit = 20 } = data;
+
+                    if (!query || query.trim().length < 2) {
+                        socket.emit('error', { message: 'Search query must be at least 2 characters' });
+                        return;
+                    }
+
+                    const messages = await Message.searchMessages(query.trim(), user._id, {
+                        roomId,
+                        limit
+                    });
+
+                    socket.emit('search_results', {
+                        success: true,
+                        query: query.trim(),
+                        results: messages.map(msg => ({
+                            id: msg._id.toString(),
+                            content: msg.encryptedContent,
+                            messageType: msg.messageType,
+                            sender: msg.sender,
+                            recipient: msg.recipient,
+                            roomId: msg.roomId,
+                            createdAt: msg.createdAt,
+                            metadata: msg.metadata
+                        }))
+                    });
+
+                } catch (error) {
+                    console.error('Search messages error:', error);
+                    socket.emit('error', { message: 'Failed to search messages' });
+                }
+            });
+
+            // Handle loading more messages (pagination)
+            socket.on('load_more_messages', async (data) => {
+                try {
+                    const { roomId, before, limit = 50 } = data;
+
+                    if (!roomId) {
+                        socket.emit('error', { message: 'Room ID is required' });
+                        return;
+                    }
+
+                    const messages = await Message.getRoomMessages(roomId, {
+                        limit,
+                        before,
+                        includeSystem: true
+                    });
+
+                    socket.emit('more_messages_loaded', {
+                        success: true,
+                        roomId,
+                        messages: messages.map(msg => ({
+                            id: msg._id.toString(),
+                            content: msg.encryptedContent,
+                            messageType: msg.messageType,
+                            sender: msg.sender,
+                            recipient: msg.recipient,
+                            roomId: msg.roomId,
+                            status: msg.status,
+                            deliveryStatus: msg.deliveryStatus,
+                            metadata: msg.metadata,
+                            encryptionMetadata: msg.encryptionMetadata,
+                            createdAt: msg.createdAt
+                        }))
+                    });
+
+                } catch (error) {
+                    console.error('Load more messages error:', error);
+                    socket.emit('error', { message: 'Failed to load more messages' });
+                }
+            });
+
             // Handle get online users
             socket.on('get_online_users', async () => {
                 try {
@@ -209,7 +557,11 @@ function initializeSocket(io) {
                     activeConnections.delete(user._id.toString());
                     
                     // Update user offline status
-                    await user.setOnlineStatus(false, null);
+                    await User.findByIdAndUpdate(user._id, { 
+                        isOnline: false, 
+                        socketId: null,
+                        lastSeen: new Date()
+                    });
                     
                     // Notify other users about offline status
                     socket.broadcast.emit('user_offline', {

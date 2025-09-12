@@ -8,15 +8,14 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState(null);
   const [roomId, setRoomId] = useState(null);
-  const [debugLogs, setDebugLogs] = useState([]);
-  const [showDebug, setShowDebug] = useState(false);
+  // Debug panel removed for cleaner UI
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (selectedUser) {
       // Join room with selected user
-      socketService.joinRoom(selectedUser._id);
+      socketService.joinRoom(selectedUser.id);
       
       // Setup message listeners
       const handleMessage = (event, data) => {
@@ -24,37 +23,150 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
           case 'room_joined':
             setRoomId(data.roomId);
             addDebugLog('Joined secure tunnel', data);
+            
+            // Load previous messages if available
+            if (data.previousMessages && data.previousMessages.length > 0) {
+              const previousMsgs = data.previousMessages.map(msg => ({
+                id: msg.id,
+                senderId: msg.sender.userId,
+                senderUsername: msg.sender.username,
+                targetUserId: msg.recipient.userId,
+                text: '[ENCRYPTED]',
+                encryptedText: msg.content,
+                timestamp: msg.createdAt,
+                isOwn: msg.sender.userId === currentUser.id,
+                encrypted: true,
+                messageType: msg.messageType,
+                status: msg.status,
+                deliveryStatus: msg.deliveryStatus,
+                metadata: msg.metadata,
+                encryptionMetadata: msg.encryptionMetadata
+              }));
+              setMessages(previousMsgs);
+              addDebugLog(`Loaded ${previousMsgs.length} previous messages`, {
+                roomId: data.roomId
+              });
+              
+              // Auto-decrypt previous messages that this user can decrypt
+              previousMsgs.forEach(msg => {
+                if (msg.senderId === currentUser.id || msg.targetUserId === currentUser.id) {
+                  socketService.decryptMessage(msg.id, msg.encryptedText, msg.senderId, msg.targetUserId);
+                }
+              });
+            }
             break;
             
-          case 'encrypted_message':
+          case 'new_message':
             addDebugLog('Received encrypted message', {
-              algorithm: data.algorithm,
-              iv: data.iv,
-              encryptedLength: data.encrypted?.length || 0,
-              sender: data.senderUsername
+              algorithm: data.encryptionMetadata?.algorithm,
+              encryptedLength: data.content?.length || 0,
+              sender: data.sender.username,
+              roomId: data.roomId,
+              status: data.status
             });
             
-            // Request decryption
-            socketService.decryptMessage(data);
+            // Add encrypted message to display
+            const encryptedMsg = {
+              id: data.id,
+              senderId: data.sender.userId,
+              senderUsername: data.sender.username,
+              targetUserId: data.recipient.userId,
+              text: '[ENCRYPTED]',
+              encryptedText: data.content,
+              timestamp: data.createdAt,
+              isOwn: data.sender.userId === currentUser.id,
+              encrypted: true,
+              messageType: data.messageType,
+              status: data.status,
+              deliveryStatus: data.deliveryStatus,
+              metadata: data.metadata,
+              encryptionMetadata: data.encryptionMetadata
+            };
+            setMessages(prev => [...prev, encryptedMsg]);
+            
+            // Auto-decrypt if this user can decrypt it
+            if (data.sender.userId === currentUser.id || data.recipient.userId === currentUser.id) {
+              socketService.decryptMessage(data.id, data.content, data.sender.userId, data.recipient.userId);
+            }
             break;
             
-          case 'decrypted_message':
-            const message = {
-              id: Date.now() + Math.random(),
-              senderId: data.senderId,
-              senderUsername: data.senderUsername,
-              recipientId: data.recipientId,
-              recipientUsername: data.recipientUsername,
-              text: data.message,
-              timestamp: data.timestamp,
-              isOwn: data.senderId === currentUser.id
-            };
-            
-            setMessages(prev => [...prev, message]);
-            addDebugLog('Message decrypted and displayed', {
-              messageLength: data.message.length,
-              sender: data.senderUsername
+          case 'message_decrypted':
+            addDebugLog('Message decrypted successfully', {
+              messageId: data.messageId,
+              decryptedLength: data.decryptedContent?.length || 0,
+              algorithm: data.encryptionMetadata?.algorithm
             });
+            
+            // Update the encrypted message with decrypted text
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === data.messageId) {
+                return {
+                  ...msg,
+                  text: data.decryptedContent,
+                  encrypted: false,
+                  status: msg.isOwn ? msg.status : 'read' // Mark as read when decrypted
+                };
+              }
+              return msg;
+            }));
+            break;
+            
+          case 'message_edited':
+            addDebugLog('Message edited', {
+              messageId: data.id,
+              edited: data.metadata?.edited
+            });
+            
+            // Update the message with edited content
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === data.id) {
+                return {
+                  ...msg,
+                  text: '[ENCRYPTED]', // Reset to encrypted state
+                  encryptedText: data.content,
+                  encrypted: true,
+                  metadata: data.metadata
+                };
+              }
+              return msg;
+            }));
+            
+            // Auto-decrypt the edited message
+            if (data.sender.userId === currentUser.id || data.recipient.userId === currentUser.id) {
+              socketService.decryptMessage(data.id, data.content, data.sender.userId, data.recipient.userId);
+            }
+            break;
+            
+          case 'message_deleted':
+            addDebugLog('Message deleted', {
+              messageId: data.messageId,
+              deletedBy: data.deletedBy
+            });
+            
+            // Remove the message from display
+            setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
+            break;
+            
+          case 'messages_read':
+            addDebugLog('Messages marked as read', {
+              count: data.messageIds?.length || 0,
+              readBy: data.readBy
+            });
+            
+            // Update message status to read
+            setMessages(prev => prev.map(msg => {
+              if (data.messageIds.includes(msg.id)) {
+                return {
+                  ...msg,
+                  status: 'read',
+                  deliveryStatus: {
+                    ...msg.deliveryStatus,
+                    readAt: data.readAt
+                  }
+                };
+              }
+              return msg;
+            }));
             break;
             
           case 'user_typing':
@@ -91,13 +203,51 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const addDebugLog = (message, data = null) => {
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      message,
-      data
-    };
-    setDebugLogs(prev => [...prev.slice(-19), logEntry]); // Keep last 20 logs
+  const addDebugLog = () => {}; // No-op after removal
+
+  const handleEditMessage = async (message) => {
+    const newContent = prompt('Edit your message:', message.text);
+    if (newContent && newContent.trim() !== message.text) {
+      try {
+        addDebugLog('Editing message', {
+          messageId: message.id,
+          oldLength: message.text.length,
+          newLength: newContent.length
+        });
+
+        // Send edit request to server
+        socketService.socket.emit('edit_message', {
+          messageId: message.id,
+          newContent: newContent.trim(),
+          roomId: roomId
+        });
+
+      } catch (error) {
+        console.error('Error editing message:', error);
+        addDebugLog('Edit message error', error.message);
+      }
+    }
+  };
+
+  const handleDeleteMessage = async (message) => {
+    if (window.confirm('Are you sure you want to delete this message?')) {
+      try {
+        addDebugLog('Deleting message', {
+          messageId: message.id,
+          contentLength: message.text.length
+        });
+
+        // Send delete request to server
+        socketService.socket.emit('delete_message', {
+          messageId: message.id,
+          roomId: roomId
+        });
+
+      } catch (error) {
+        console.error('Error deleting message:', error);
+        addDebugLog('Delete message error', error.message);
+      }
+    }
   };
 
   const handleSendMessage = async (e) => {
@@ -116,10 +266,10 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
         roomId
       });
 
-      socketService.sendMessage(selectedUser._id, messageText, roomId);
+      socketService.sendMessage(selectedUser.id, messageText, roomId);
       
       // Stop typing indicator
-      socketService.stopTyping(selectedUser._id);
+      socketService.stopTyping(roomId);
       
     } catch (error) {
       console.error('Error sending message:', error);
@@ -136,7 +286,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     // Handle typing indicators
     if (e.target.value.trim() && !isTyping) {
       setIsTyping(true);
-      socketService.startTyping(selectedUser._id);
+      socketService.startTyping(roomId);
     }
     
     // Clear existing timeout
@@ -147,7 +297,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     // Set new timeout to stop typing
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
-      socketService.stopTyping(selectedUser._id);
+      socketService.stopTyping(roomId);
     }, 1000);
   };
 
@@ -156,14 +306,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const formatDebugTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit' 
-    });
-  };
+  // Debug timestamp formatting removed
 
   if (!selectedUser) {
     return (
@@ -212,11 +355,105 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
               className={`message ${message.isOwn ? 'own' : ''}`}
             >
               <div className="message-bubble">
-                <div className="message-header">
-                  <span>{message.senderUsername}</span>
-                  <span>{formatTimestamp(message.timestamp)}</span>
+                {!message.isOwn && (
+                  <div className="message-header">
+                    <span>{message.senderUsername}</span>
+                  </div>
+                )}
+                <div className="message-content">
+                  <div className="message-text">
+                    {message.text}
+                    {message.encrypted && (
+                      <button 
+                        onClick={() => socketService.decryptMessage(
+                          message.id,
+                          message.encryptedText, 
+                          message.senderId, 
+                          message.targetUserId
+                        )}
+                        style={{
+                          marginLeft: '10px',
+                          padding: '2px 6px',
+                          background: '#ffc107',
+                          border: 'none',
+                          borderRadius: '3px',
+                          fontSize: '10px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🔓 Decrypt
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Message metadata */}
+                  <div className="message-meta">
+                    {message.metadata?.edited && (
+                      <span className="edited-indicator" style={{ 
+                        fontSize: '10px', 
+                        color: '#666', 
+                        marginRight: '8px' 
+                      }}>
+                        edited
+                      </span>
+                    )}
+                    
+                    {/* Message status indicators */}
+                    {message.isOwn && (
+                      <span className="message-status" style={{ 
+                        fontSize: '10px', 
+                        color: message.status === 'read' ? '#28a745' : 
+                               message.status === 'delivered' ? '#17a2b8' : '#6c757d'
+                      }}>
+                        {message.status === 'read' ? '✓✓' : 
+                         message.status === 'delivered' ? '✓' : '○'}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Message actions (edit/delete for own messages) */}
+                  {message.isOwn && !message.encrypted && (
+                    <div className="message-actions" style={{ 
+                      marginTop: '5px', 
+                      display: 'flex', 
+                      gap: '5px' 
+                    }}>
+                      {message.metadata?.edited !== true && (
+                        <button 
+                          onClick={() => handleEditMessage(message)}
+                          style={{
+                            padding: '2px 6px',
+                            background: '#007bff',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '3px',
+                            fontSize: '10px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => handleDeleteMessage(message)}
+                        style={{
+                          padding: '2px 6px',
+                          background: '#dc3545',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '3px',
+                          fontSize: '10px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="message-text">{message.text}</div>
+                <div className="message-timestamp">
+                  {formatTimestamp(message.timestamp)}
+                </div>
               </div>
             </div>
           ))
@@ -257,56 +494,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
         </form>
       </div>
 
-      {/* Debug Panel Toggle */}
-      <button 
-        className="debug-toggle"
-        onClick={() => setShowDebug(!showDebug)}
-        title="Toggle debug panel"
-      >
-        🔍
-      </button>
-
-      {/* Debug Panel */}
-      {showDebug && (
-        <div className="debug-panel">
-          <h4>🔐 Encryption Debug Log</h4>
-          <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
-            {debugLogs.length === 0 ? (
-              <p>No debug logs yet...</p>
-            ) : (
-              debugLogs.map((log, index) => (
-                <div key={index} style={{ marginBottom: '8px', fontSize: '11px' }}>
-                  <div style={{ color: '#ffc107' }}>
-                    [{formatDebugTimestamp(log.timestamp)}] {log.message}
-                  </div>
-                  {log.data && (
-                    <div style={{ color: '#ccc', marginLeft: '10px' }}>
-                      {typeof log.data === 'string' 
-                        ? log.data 
-                        : JSON.stringify(log.data, null, 2)
-                      }
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-          <button 
-            onClick={() => setDebugLogs([])}
-            style={{ 
-              marginTop: '10px', 
-              padding: '5px 10px', 
-              background: '#dc3545', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '4px',
-              fontSize: '11px'
-            }}
-          >
-            Clear Logs
-          </button>
-        </div>
-      )}
+      {/* Debug panel removed */}
     </div>
   );
 };
