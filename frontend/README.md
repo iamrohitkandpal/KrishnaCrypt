@@ -28,7 +28,7 @@ echo "REACT_APP_SOCKET_URL=http://localhost:5000" >> .env
 npm start
 ```
 
-The app will open at `http://localhost:3000`
+The app will open at `http://localhost:3001`
 
 ### Production Build
 ```bash
@@ -145,7 +145,7 @@ npm start
 cd frontend
 npm install
 npm start
-# App opens at http://localhost:3000
+# App opens at http://localhost:3001
 ```
 
 3. **Terminal 3 - MongoDB (if local):**
@@ -157,7 +157,7 @@ mongod
 ## 🧪 Manual Testing Plan
 
 ### Test Scenario 1: User Registration & Authentication
-1. Open `http://localhost:3000`
+1. Open `http://localhost:3001`
 2. Click "Need an account? Register"
 3. Register with username: `alice`, password: `password123`
 4. Login with same credentials
@@ -237,7 +237,7 @@ The `package.json` includes a proxy for development:
 ### Common Issues
 
 1. **CORS Errors:**
-   - Ensure backend CORS is configured for `http://localhost:3000`
+   - Ensure backend CORS is configured for `http://localhost:3001`
    - Check `CLIENT_URL` environment variable in backend
 
 2. **Socket Connection Failed:**

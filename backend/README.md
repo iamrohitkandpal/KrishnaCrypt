@@ -46,7 +46,7 @@ PORT=5000
 NODE_ENV=development
 
 # Client Configuration
-CLIENT_URL=http://localhost:3000
+CLIENT_URL=http://localhost:3001
 ```
 
 ## 🏗️ Architecture
