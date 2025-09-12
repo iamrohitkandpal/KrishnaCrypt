@@ -1,17 +1,50 @@
 # KrishnaCrypt Manual Testing Plan
 
-## 🧪 Comprehensive Testing Guide for Encrypted Messaging Demo
+## 🧪 Comprehensive Testing Guide for Encrypted Friend-Based Messaging Demo
 
 ### Prerequisites
-- MongoDB running (local or Atlas)
-- Backend server running on port 5000
+- MongoDB### Test 3.1: Basic Friend Messaging
+**Objective**: Verify encrypted messaging between friends
+
+**Steps**:
+1. **Alice's browser**: Click on "bob" in friends list
+2. ✅ Should show "Secure tunnel established" message
+3. ✅ Room ID should appear in chat header (e.g., "Room: a1b2c3d4...")
+4. **Alice sends**: "Hello Bob! This is my first encrypted message!"
+5. **Bob's browser**: Should automatically show Alice in chat
+6. **Bob sends**: "Hi Alice! I received your encrypted message!"
+7. **Alice sends**: "Great! The encryption is working! 🔐"
+
+**Expected Results**:
+- Messages appear in both browsers instantly
+- Timestamps are accurate
+- Message bubbles show correct sender
+- Encryption status shows "Secure tunnel established"
+
+### Test 3.2: Non-Friend Messaging Prevention
+**Objective**: Verify that messaging is restricted to friends only
+
+**Steps**:
+1. **Create new user**: Register as `diana` in new browser
+2. **Diana tries to message Alice**: Enter Alice's secret ID
+3. ✅ Diana should NOT be able to see Alice in any list
+4. **Diana tries to join room**: Should be rejected by server
+5. **Alice's friends list**: Should NOT show Diana
+6. **Verify isolation**: Only Bob and Charlie can message Alice
+
+**Expected Results**:
+- Non-friends cannot initiate conversations
+- Server rejects unauthorized room joins
+- Friend relationships enforce messaging restrictions
+- Privacy is maintained between non-friendsr Atlas)
+- Backend server running on port 5432
 - Frontend running on port 3000
 - Two different browsers or incognito windows
 
-## Test Suite 1: Authentication & Setup (15 minutes)
+## Test Suite 1: Authentication & Friend Setup (20 minutes)
 
-### Test 1.1: User Registration
-**Objective**: Verify user registration with validation
+### Test 1.1: User Registration with Secret ID
+**Objective**: Verify user registration with secret ID generation
 
 **Steps**:
 1. Open `http://localhost:3000`
@@ -23,11 +56,13 @@
    - Username: `alice`
    - Password: `password123`
 5. ✅ Should show "Registration successful" message
-6. Should automatically switch to login form
+6. ✅ Should display unique secret ID (UUID format)
+7. Should automatically switch to login form
 
 **Expected Results**:
 - Form validation works correctly
 - Successful registration message appears
+- Unique secret ID is generated and displayed
 - User can proceed to login
 
 ### Test 1.2: User Login
@@ -39,26 +74,102 @@
 3. Should see "Welcome, alice" in header
 4. Should see connection status: "🟢 Connected"
 5. Check browser localStorage for `authToken`
+6. ✅ Should see user's secret ID displayed
+7. ✅ Should see empty friends list initially
 
 **Expected Results**:
 - JWT token stored in localStorage
 - Socket connection established
 - User interface loads correctly
+- Secret ID is visible for copying
+- Friends list is initially empty
 
-### Test 1.3: Multiple User Setup
-**Objective**: Create test users for messaging
+### Test 1.3: Secret ID Copy Functionality
+**Objective**: Test secret ID copying for friend sharing
+
+**Steps**:
+1. **Alice's browser**: Click "Copy Secret ID" button
+2. ✅ Should show "Secret ID copied!" notification
+3. **Verify clipboard**: Paste in notepad/text editor
+4. ✅ Should contain the full UUID (e.g., `f47ac10b-58cc-4372-a567-0e02b2c3d479`)
+
+**Expected Results**:
+- Copy functionality works correctly
+- User feedback is provided
+- Secret ID is properly copied to clipboard
+
+### Test 1.4: Multiple User Setup
+**Objective**: Create test users for friend-based messaging
 
 **Steps**:
 1. **Browser 1**: Register/login as `alice`
 2. **Browser 2** (incognito): Register/login as `bob`
 3. **Browser 3** (different browser): Register/login as `charlie`
+4. **Note each user's secret ID** for friend addition testing
 
 **Expected Results**:
 - All users can register and login independently
-- Each user sees others in the user list
-- Online status indicators work
+- Each user gets a unique secret ID
+- Friends lists are initially empty
+- No users appear in friends list until added
 
-## Test Suite 2: Encrypted Messaging (20 minutes)
+## Test Suite 2: Friend Management (15 minutes)
+
+### Test 2.1: Add Friend by Secret ID
+**Objective**: Verify friend addition functionality
+
+**Steps**:
+1. **Alice's browser**: Enter Bob's secret ID in "Add Friend" input
+2. Click "Add Friend" button
+3. ✅ Should show "Friend added successfully!" message
+4. ✅ Bob should appear in Alice's friends list
+5. **Bob's browser**: Should see Alice in friends list
+6. **Verify mutual friendship**: Both users should see each other
+
+**Expected Results**:
+- Friend addition works with valid secret ID
+- Success message is displayed
+- Friends list updates in real-time
+- Friendship is bidirectional
+
+### Test 2.2: Invalid Secret ID Handling
+**Objective**: Test error handling for invalid secret IDs
+
+**Steps**:
+1. **Alice's browser**: Enter invalid secret ID (e.g., `invalid-id`)
+2. Click "Add Friend" button
+3. ✅ Should show error message: "Invalid secret ID or user not found"
+4. **Try Charlie's secret ID** (not yet friends)
+5. ✅ Should add successfully
+6. **Try Alice's own secret ID**
+7. ✅ Should show error: "Cannot add yourself as a friend"
+
+**Expected Results**:
+- Invalid secret IDs are rejected
+- Clear error messages are provided
+- Self-addition is prevented
+- Valid secret IDs work correctly
+
+### Test 2.3: Friend List Display
+**Objective**: Verify friends list shows correct information
+
+**Steps**:
+1. **Alice's browser**: Check friends list
+2. ✅ Should show Bob and Charlie as friends
+3. ✅ Should show online/offline status
+4. ✅ Should NOT show Alice herself in the list
+5. **Close Bob's browser**
+6. **Alice's browser**: Should see Bob go offline
+7. **Reopen Bob's browser and login**
+8. **Alice's browser**: Should see Bob come back online
+
+**Expected Results**:
+- Friends list displays correctly
+- Online status updates in real-time
+- Current user is not shown in their own friends list
+- Friend relationships are properly maintained
+
+## Test Suite 3: Friend-Based Encrypted Messaging (20 minutes)
 
 ### Test 2.1: Basic Message Exchange
 **Objective**: Verify end-to-end encrypted messaging
@@ -114,15 +225,15 @@
 }
 ```
 
-### Test 2.3: Multi-User Room Isolation
-**Objective**: Verify message encryption isolation between different user pairs
+### Test 3.4: Multiple Friend Conversations
+**Objective**: Test messaging isolation between different friend pairs
 
 **Steps**:
 1. **Alice ↔ Bob conversation**:
    - Alice sends: "Secret message for Bob only"
    - Verify Bob receives it
 2. **Alice ↔ Charlie conversation**:
-   - Alice clicks on "charlie" in user list
+   - Alice clicks on "charlie" in friends list
    - ✅ Should create NEW room with different Room ID
    - Alice sends: "Different secret for Charlie"
    - Verify Charlie receives it, Bob does NOT
@@ -133,17 +244,18 @@
    - Verify Charlie receives it, Alice does NOT
 
 **Expected Results**:
-- Each user pair has unique Room ID (SHA-256 hash)
+- Each friend pair has unique Room ID (SHA-256 hash)
 - Messages are isolated between different conversations
 - No cross-talk between different encrypted tunnels
+- Friend relationships maintain conversation privacy
 
 ## Test Suite 3: Real-Time Features (10 minutes)
 
-### Test 3.1: Typing Indicators
-**Objective**: Test real-time typing notifications
+### Test 4.1: Typing Indicators
+**Objective**: Test real-time typing notifications between friends
 
 **Steps**:
-1. **Alice's browser**: Start typing in message input
+1. **Alice's browser**: Start typing in message input (with Bob selected)
 2. **Bob's browser**: Should see "alice is typing..." indicator
 3. **Alice**: Stop typing for 1 second
 4. **Bob**: Typing indicator should disappear
@@ -153,20 +265,23 @@
 **Expected Results**:
 - Typing indicators appear/disappear correctly
 - No delay or lag in real-time updates
+- Only works between friends
 
-### Test 3.2: User Presence
-**Objective**: Verify online/offline status tracking
+### Test 4.2: Friend Presence
+**Objective**: Verify online/offline status tracking for friends
 
 **Steps**:
-1. **All browsers**: Verify green online indicators next to usernames
+1. **All browsers**: Verify green online indicators next to friends
 2. **Close Bob's browser**
-3. **Alice & Charlie**: Should see Bob go offline (no green indicator)
+3. **Alice & Charlie**: Should see Bob go offline in friends list
 4. **Reopen Bob's browser and login**
 5. **Alice & Charlie**: Should see Bob come back online
+6. **Diana (non-friend)**: Should NOT see any online status updates
 
 **Expected Results**:
-- Online status updates in real-time
-- User list reflects accurate presence information
+- Online status updates in real-time for friends
+- Non-friends don't see presence information
+- Friend relationships control visibility
 
 ## Test Suite 4: Cybersecurity Demo (15 minutes)
 
@@ -207,24 +322,15 @@
 3. **Demonstrate**: Same user pair always gets same room ID
 4. **Security**: Impossible to guess other users' room IDs
 
-### Test 4.3: Encryption Algorithm Demo
-**Objective**: Explain custom lightweight encryption
+### Test 5.3: Friend-Based Access Control Demo
+**Objective**: Demonstrate privacy through friend relationships
 
 **Steps**:
-1. **Open debug panel** and send test message
-2. **Explain algorithm components**:
-   - 128-bit key derived from user IDs + server salt
-   - 3-round substitution-permutation network
-   - Custom S-box for byte substitution
-   - Row shifting and matrix mixing
-   - CBC mode with random IV
-   - Base64 encoding for transport
-
-3. **Security properties**:
-   - Unique keys per user pair
-   - Random IV prevents pattern recognition
-   - Server-side tunneling (VPN-like)
-   - No plaintext storage
+1. **Show Alice's friends list**: Only Bob and Charlie
+2. **Show Diana's friends list**: Empty or different friends
+3. **Attempt cross-messaging**: Diana cannot message Alice
+4. **Explain**: Secret IDs enable controlled friend discovery
+5. **Demonstrate**: Only mutual friends can communicate
 
 ## Test Suite 5: Error Handling & Edge Cases (10 minutes)
 
@@ -316,10 +422,17 @@
 - Check CORS configuration
 - Clear browser localStorage and retry
 
+### Issue: "Friend Addition Failed"
+**Solutions**:
+- Verify secret ID format (UUID v4)
+- Check if user exists
+- Ensure not adding yourself
+- Check network connectivity
+
 ### Issue: "Messages Not Appearing"
 **Solutions**:
 - Check debug panel for encryption errors
-- Verify both users are online
+- Verify both users are online friends
 - Check browser console for JavaScript errors
 - Restart both frontend and backend
 
@@ -330,31 +443,37 @@
 - Check backend database connection
 - Review backend logs for errors
 
-### Issue: "Debug Panel Not Working"
+### Issue: "Cannot Message Non-Friend"
 **Solutions**:
-- Refresh browser page
-- Check if debug mode is enabled
-- Clear debug logs and retry
-- Check browser console for errors
+- This is expected behavior for privacy
+- Add user as friend first using secret ID
+- Verify friend relationship is mutual
+- Check online status of friend
 
 ## 📊 Success Criteria
 
 ### ✅ All Tests Pass When:
-- Users can register and login successfully
+- Users can register with unique secret IDs
+- Secret ID copying and sharing works
+- Friend addition by secret ID functions correctly
+- Only friends can message each other when online
 - Messages are encrypted and transmitted in real-time
 - Debug panel shows encryption details
 - Network traffic shows base64 encrypted payloads
-- Room isolation works correctly
+- Friend relationships enforce messaging restrictions
+- Room isolation works correctly between friend pairs
 - Connection resilience handles server restarts
 - Multiple browsers can chat simultaneously
-- Typing indicators work in real-time
-- Online/offline status updates correctly
+- Typing indicators work between friends
+- Online/offline status updates correctly for friends
 
 ### 🎯 Demo Success Metrics:
 - **Setup Time**: < 5 minutes for full demo environment
+- **Friend Addition**: < 30 seconds per friend
 - **Message Latency**: < 100ms for local testing
 - **Encryption Visibility**: Debug panel shows all operations
 - **Security Demo**: Network traffic shows no plaintext
-- **User Experience**: Intuitive interface, no confusion
+- **Privacy Demo**: Non-friends cannot communicate
+- **User Experience**: Intuitive friend management interface
 
 This comprehensive testing plan ensures the KrishnaCrypt application demonstrates both functional messaging and cybersecurity principles effectively.

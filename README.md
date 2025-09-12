@@ -1,15 +1,17 @@
-# KrishnaCrypt - Secure Tunneling Chat Application
+# KrishnaCrypt - Secure Friend-Based Chat Application
 
-A cybersecurity-focused real-time chat application with end-to-end encryption, VPN-like tunneling, and secure messaging capabilities.
+A cybersecurity-focused real-time chat application with end-to-end encryption, VPN-like tunneling, and secure friend-based messaging capabilities.
 
 ## Features
 
+- **Friend-Based Messaging**: Users can only chat with added friends
+- **Unique Secret IDs**: Each user gets a unique secret ID for friend discovery
 - **End-to-End Encryption**: Custom lightweight symmetric encryption algorithm
 - **VPN-like Tunneling**: Server-side message encryption/decryption simulation
 - **Real-time Messaging**: Socket.io powered instant communication
 - **JWT Authentication**: Secure user authentication with bcrypt password hashing
 - **Private Rooms**: SHA-256 hashed secure communication channels
-- **User Presence**: Online/offline status tracking
+- **User Presence**: Online/offline status tracking for friends only
 - **Cybersecurity Demo**: Visible encryption processes for educational purposes
 
 ## Architecture
@@ -20,6 +22,7 @@ A cybersecurity-focused real-time chat application with end-to-end encryption, V
 - MongoDB with Mongoose ODM
 - Custom encryption module
 - JWT authentication middleware
+- Friend relationship management
 
 ### Frontend (React.js)
 - React functional components
@@ -27,6 +30,7 @@ A cybersecurity-focused real-time chat application with end-to-end encryption, V
 - Axios for API calls
 - Responsive CSS design
 - Debug panel for encryption visibility
+- Friend management interface
 
 ## Security Implementation
 
@@ -44,6 +48,7 @@ A cybersecurity-focused real-time chat application with end-to-end encryption, V
 - Secure room ID generation (SHA-256)
 - Input validation and sanitization
 - CORS configuration
+- Friend-based access control
 
 ## Installation & Setup
 
@@ -85,8 +90,8 @@ npm install
 
 # Setup environment variables
 # Create .env file with:
-# REACT_APP_API_URL=http://localhost:5000
-# REACT_APP_SOCKET_URL=http://localhost:5000
+# REACT_APP_API_URL=http://localhost:5432
+# REACT_APP_SOCKET_URL=http://localhost:5432
 
 # Start React development server
 npm start
@@ -99,25 +104,26 @@ npm start
 MONGODB_URI=mongodb://localhost:27017/krishnacrypt
 JWT_SECRET=your-super-secret-jwt-key-here
 JWT_EXPIRES_IN=24h
-PORT=5000
+PORT=5432
 NODE_ENV=development
 CLIENT_URL=http://localhost:3000
 ```
 
 ### Frontend (frontend/.env)
 ```env
-REACT_APP_API_URL=http://localhost:5000
-REACT_APP_SOCKET_URL=http://localhost:5000
+REACT_APP_API_URL=http://localhost:5432
+REACT_APP_SOCKET_URL=http://localhost:5432
 ```
 
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/register` - User registration
+- `POST /api/auth/register` - User registration (returns secretId)
 - `POST /api/auth/login` - User login
 - `POST /api/auth/logout` - User logout
-- `GET /api/auth/me` - Get user profile
-- `GET /api/auth/users` - Get all users
+- `GET /api/auth/me` - Get user profile with friends list
+- `GET /api/auth/friends` - Get user's friends list
+- `POST /api/auth/add-friend` - Add friend by secret ID
 
 ### Health Check
 - `GET /health` - Server health status
@@ -126,27 +132,51 @@ REACT_APP_SOCKET_URL=http://localhost:5000
 ## Socket.io Events
 
 ### Client Events
-- `join_room` - Join private chat room
-- `private_message` - Send encrypted message
+- `join_room` - Join private chat room (friend validation required)
+- `private_message` - Send encrypted message to friend
 - `typing_start/stop` - Typing indicators
-- `get_online_users` - Fetch online users
+- `get_online_friends` - Fetch online friends
 
 ### Server Events
-- `new_message` - Incoming encrypted message
-- `user_typing` - Typing indicator
-- `online_users` - Online users list
+- `new_message` - Incoming encrypted message from friend
+- `user_typing` - Typing indicator from friend
+- `online_friends` - Online friends list
 - `connection_established` - Connection success
+
+## Friend System
+
+### How It Works
+1. **Registration**: Users get a unique secret ID upon registration
+2. **Secret ID Sharing**: Users copy and share their secret ID with others
+3. **Adding Friends**: Users enter others' secret IDs to add them as friends
+4. **Messaging**: Users can only chat with their friends when both are online
+5. **Privacy**: Friend relationships are private and stored securely
+
+### Secret ID Format
+- Generated using `crypto.randomUUID()`
+- Format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+- Example: `f47ac10b-58cc-4372-a567-0e02b2c3d479`
 
 ## Testing
 
 ### Manual Testing
-1. Register two users
+1. Register two users and note their secret IDs
 2. Login with both accounts
-3. Start a conversation
-4. Observe encrypted messages in debug panel
-5. Verify message decryption
-6. Test typing indicators
-7. Test connection resilience
+3. Add each other as friends using secret IDs
+4. Start a conversation when both are online
+5. Observe encrypted messages in debug panel
+6. Verify message decryption
+7. Test typing indicators
+8. Test connection resilience
+
+### Friend System Testing
+```bash
+# Test friend addition
+curl -X POST http://localhost:5432/api/auth/add-friend \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"secretId":"friend-secret-id-here"}'
+```
 
 ### Encryption Testing
 ```bash
@@ -165,7 +195,6 @@ import('./utils/encryption.js').then(enc => {
 ```bash
 # From backend directory
 heroku create krishnacrypt-backend
-heroku create your-app-name
 
 # Set environment variables
 heroku config:set NODE_ENV=production
@@ -176,49 +205,56 @@ heroku config:set MONGODB_URI=your-mongodb-uri
 git push heroku main
 ```
 
-### Render Deployment
-1. Connect your GitHub repository
-2. Set build command: `npm install`
-3. Set start command: `npm start`
-4. Add environment variables in dashboard
-
 ## 🧪 Testing
 
 ### Manual Testing with curl
 
 **Register User:**
 ```bash
-curl -X POST http://localhost:5000/api/auth/register \
+curl -X POST http://localhost:5432/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser","password":"password123"}'
 ```
 
 **Login:**
 ```bash
-curl -X POST http://localhost:5000/api/auth/login \
+curl -X POST http://localhost:5432/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser","password":"password123"}'
 ```
 
-**Health Check:**
+**Add Friend:**
 ```bash
-curl http://localhost:5000/health
+curl -X POST http://localhost:5432/api/auth/add-friend \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"secretId":"friend-secret-id"}'
 ```
 
-### Socket.io Testing
-Use a Socket.io client library or tool like Postman to test WebSocket connections with JWT authentication.
+**Get Friends:**
+```bash
+curl -X GET http://localhost:5432/api/auth/friends \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Health Check:**
+```bash
+curl http://localhost:5432/health
+```
 
 ## 🔧 Configuration Options
 
 - **MongoDB**: Supports both local MongoDB and MongoDB Atlas
 - **CORS**: Configured for React frontend on port 3000
-- **JWT**: 7-day expiration by default
-- **Encryption**: AES-256-GCM with random IVs
+- **JWT**: 24-hour expiration by default
+- **Encryption**: Custom 128-bit algorithm with random IVs
 - **Password Hashing**: bcrypt with 12 salt rounds
+- **Secret IDs**: UUID v4 format for friend discovery
 
 ## 📝 Notes
 
 - Built with function-based architecture (no classes)
+- Friend-based access control for enhanced privacy
 - Optimized for quick setup (under 4 hours)
 - Minimal dependencies for reduced overhead
 - Production-ready with proper error handling
@@ -229,9 +265,10 @@ Use a Socket.io client library or tool like Postman to test WebSocket connection
 The server is designed to work with React frontends. Key integration points:
 
 1. **Authentication**: Store JWT token from login response
-2. **Socket Connection**: Pass JWT token in Socket.io handshake auth
-3. **Message Flow**: Send plain messages, receive encrypted, request decryption
-4. **Room Management**: Use user IDs to generate consistent room IDs
+2. **Friend Management**: Display secret ID, allow copying, handle friend addition
+3. **Socket Connection**: Pass JWT token in Socket.io handshake auth
+4. **Message Flow**: Send plain messages to friends, receive encrypted, request decryption
+5. **Room Management**: Use friend relationships to generate consistent room IDs
 
 ## 📄 License
 
