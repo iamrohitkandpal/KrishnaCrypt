@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5432';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -24,9 +24,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      console.log('🔄 Authentication failed, clearing stored data...');
       localStorage.removeItem('authToken');
       localStorage.removeItem('currentUser');
-      window.location.href = '/';
+      
+      // Reload the page to show login screen
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
     }
     return Promise.reject(error);
   }
@@ -55,7 +60,26 @@ export const authAPI = {
   },
 
   getUsers: async () => {
-    const response = await api.get('/api/auth/users');
+    const response = await api.get('/api/auth/friends');
+    // Map MongoDB _id to id if needed
+    if (response.data.success && response.data.data.friends) {
+      response.data.data.friends = response.data.data.friends.map(friend => ({
+        id: friend.id || friend._id,
+        username: friend.username,
+        isOnline: friend.isOnline || false,
+        lastSeen: friend.lastSeen
+      }));
+    }
+    return response.data;
+  },
+
+  addFriend: async (secretId) => {
+    const response = await api.post('/api/auth/add-friend', { secretId });
+    return response.data;
+  },
+
+  validatePassword: async (password) => {
+    const response = await api.post('/api/auth/validate-password', { password });
     return response.data;
   },
 };

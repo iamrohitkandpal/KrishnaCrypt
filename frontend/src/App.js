@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import UserList from './components/UserList';
 import Chat from './components/Chat';
 import socketService from './services/socket';
 import { getCurrentUser, removeAuthToken } from './services/api';
+import api from './services/api';
 import './index.css';
 
 function App() {
@@ -20,9 +21,25 @@ function App() {
     const savedToken = localStorage.getItem('authToken');
     
     if (savedUser && savedToken) {
-      setCurrentUser(savedUser);
-      setAuthToken(savedToken);
-      connectSocket(savedToken);
+      console.log('🔑 Found saved authentication data, validating...');
+      // Validate token by making a test API call
+      api.get('/api/auth/me')
+        .then(response => {
+          if (response.data.success) {
+            console.log('✅ Token is valid, connecting...');
+            setCurrentUser(savedUser);
+            setAuthToken(savedToken);
+            connectSocket(savedToken);
+          } else {
+            throw new Error('Invalid token response');
+          }
+        })
+        .catch(error => {
+          console.log('❌ Token validation failed, clearing data:', error.message);
+          removeAuthToken();
+        });
+    } else {
+      console.log('ℹ️ No saved authentication data found');
     }
 
     // Check if mobile
@@ -33,41 +50,128 @@ function App() {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+    // Add connection health check
+    const healthCheckInterval = setInterval(() => {
+      if (currentUser && authToken && connectionStatus === 'connected') {
+        // Ping the server to check connection health
+        api.get('/health')
+          .then(response => {
+            if (!response.data.database) {
+              console.warn('⚠️ Database connection issue detected');
+            }
+          })
+          .catch(error => {
+            console.warn('⚠️ Health check failed:', error.message);
+            // Try to reconnect if health check fails
+            if (connectionStatus === 'connected') {
+              console.log('🔄 Attempting to reconnect due to health check failure...');
+              connectSocket(authToken);
+            }
+          });
+      }
+    }, 30000); // Check every 30 seconds
+    
+    // Add visibility change handler for better connection management
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && currentUser && authToken) {
+        // When user comes back to the tab, check connection
+        if (connectionStatus !== 'connected') {
+          console.log('🔄 User returned to tab, checking connection...');
+          connectSocket(authToken);
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('resize', checkMobile);
+      clearInterval(healthCheckInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentUser, authToken, connectionStatus]);
+
+  // Connection attempt tracker
+  const connectingRef = useRef(false);
 
   const connectSocket = async (token) => {
+    // Prevent multiple simultaneous connection attempts
+    if (connectingRef.current) {
+      console.log('🔄 Connection attempt already in progress, skipping...');
+      return;
+    }
+
     try {
+      connectingRef.current = true;
+      console.log('🔌 Starting socket connection process...');
       setConnectionStatus('connecting');
-      await socketService.connect(token);
-      setConnectionStatus('connected');
       
-      // Setup socket event listeners
-      socketService.onMessage((event, data) => {
+      // Validate token before attempting socket connection
+      if (!token) {
+        throw new Error('No authentication token provided');
+      }
+      
+      console.log('🔑 Token found, attempting socket connection...');
+      await socketService.connect(token);
+      
+      // Only update state if still mounting/mounted
+      setConnectionStatus('connected');
+      console.log('✅ Socket connection successful');
+      
+      // Setup socket event listeners (only once)
+      const messageHandler = (event, data) => {
         switch (event) {
           case 'online_users':
+            console.log('👥 Online users updated:', data.users);
             setOnlineUsers(data.users || []);
             break;
           case 'user_offline':
+            console.log('👤 User went offline:', data);
             setOnlineUsers(prev => 
-              prev.filter(user => user.userId !== data.userId)
+              prev.filter(user => user.id !== data.userId)
             );
             break;
-          default:
+          case 'room_joined':
+            console.log('🏠 Joined room:', data);
             break;
+          case 'new_message':
+            console.log('💬 New message received');
+            break;
+          default:
+            console.log('📡 Socket event:', event, data);
         }
-      });
+      };
 
-      socketService.onConnection((event, data) => {
+      const connectionHandler = (event, data) => {
+        console.log('🔄 Socket connection event:', event, data);
         setConnectionStatus(event);
-      });
+        
+        // If reconnected, refresh friends list and online users
+        if (event === 'connected' && data && !data.message?.includes('fallback')) {
+          console.log('🔄 Reconnected, refreshing data...');
+          socketService.getOnlineUsers();
+        }
+      };
+
+      socketService.onMessage(messageHandler);
+      socketService.onConnection(connectionHandler);
 
       // Request online users
       socketService.getOnlineUsers();
       
     } catch (error) {
-      console.error('Socket connection failed:', error);
+      console.error('❌ Socket connection failed:', error);
       setConnectionStatus('error');
+      
+      // If authentication failed, clear stored data
+      if (error.message.includes('Authentication') || error.message.includes('token')) {
+        console.log('🔄 Clearing invalid authentication data...');
+        removeAuthToken();
+        setCurrentUser(null);
+        setAuthToken(null);
+      }
+    } finally {
+      connectingRef.current = false;
     }
   };
 
