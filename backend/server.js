@@ -43,12 +43,17 @@ const io = new Server(server, {
     },
     transports: ['websocket', 'polling'],
     // Connection persistence settings
-    pingTimeout: 60000, // 60 seconds
-    pingInterval: 25000, // 25 seconds
-    connectTimeout: 20000, // 20 seconds
-    maxHttpBufferSize: 1e8, // 100MB for large messages
+    pingTimeout: 30000, // 30 seconds
+    pingInterval: 10000, // 10 seconds
+    connectTimeout: 10000, // 10 seconds
+    maxHttpBufferSize: 1e7, // 10MB for messages
     allowEIO3: true, // Allow Engine.IO v3 clients
-    cookie: false // Disable cookies for better compatibility
+    cookie: false, // Disable cookies for better compatibility
+    // Enable automatic reconnection with better settings
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000
 });
 
 // Environment variables
