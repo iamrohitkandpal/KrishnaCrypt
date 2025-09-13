@@ -8,7 +8,7 @@ import {
     validateEncryptedFormat 
 } from '../utils/encryption.js';
 
-// Store active connections
+// Store active connections: userId -> { userId, username, socketIds: Set<string> }
 const activeConnections = new Map();
 
 /**
@@ -24,17 +24,23 @@ function initializeSocket(io) {
             const user = socket.user;
             console.log(`User ${user.username} connected with socket ID: ${socket.id}`);
 
-            // Store active connection
-            activeConnections.set(user._id.toString(), {
-                socketId: socket.id,
-                username: user.username,
-                userId: user._id.toString()
-            });
+            // Store active connection (support multiple tabs/devices)
+            const uid = user._id.toString();
+            const existing = activeConnections.get(uid);
+            if (existing) {
+                existing.socketIds.add(socket.id);
+            } else {
+                activeConnections.set(uid, {
+                    userId: uid,
+                    username: user.username,
+                    socketIds: new Set([socket.id])
+                });
+            }
 
             // Update user online status in database
             await User.findByIdAndUpdate(user._id, { 
                 isOnline: true, 
-                socketId: socket.id,
+                socketId: socket.id, // last active socket
                 lastSeen: new Date()
             });
 
@@ -58,16 +64,17 @@ function initializeSocket(io) {
                         return;
                     }
 
-                    // Check if target user is a friend
-                    if (!user.friends.includes(targetUserId)) {
+                    // Check if target user is a friend (handle ObjectId vs string)
+                    const isFriendJoin = Array.isArray(user.friends) && user.friends.some(fid => fid.toString() === targetUserId);
+                    if (!isFriendJoin) {
                         socket.emit('error', { message: 'You can only chat with your friends' });
                         return;
                     }
 
-                    // Check if target user is online
+                    // Fetch target user; allow joining even if offline (for history and offline messaging)
                     const targetUser = await User.findById(targetUserId);
-                    if (!targetUser || !targetUser.isOnline) {
-                        socket.emit('error', { message: 'User is not online' });
+                    if (!targetUser) {
+                        socket.emit('error', { message: 'User not found' });
                         return;
                     }
 
@@ -153,16 +160,17 @@ function initializeSocket(io) {
                         return;
                     }
 
-                    // Check friendship
-                    if (!user.friends.includes(targetUserId)) {
+                    // Check friendship (handle ObjectId vs string)
+                    const isFriend = Array.isArray(user.friends) && user.friends.some(fid => fid.toString() === targetUserId);
+                    if (!isFriend) {
                         socket.emit('error', { message: 'You can only send messages to your friends' });
                         return;
                     }
 
-                    // Fetch target user
+                    // Fetch target user (allow sending even if offline)
                     const targetUser = await User.findById(targetUserId);
-                    if (!targetUser || !targetUser.isOnline) {
-                        socket.emit('error', { message: 'User is not online' });
+                    if (!targetUser) {
+                        socket.emit('error', { message: 'User not found' });
                         return;
                     }
 
@@ -183,9 +191,11 @@ function initializeSocket(io) {
                     // Also ensure target is in the room (if connected) for delivery
                     const targetConnection = activeConnections.get(targetUserId.toString());
                     if (targetConnection) {
-                        const targetSocket = io.sockets.sockets.get(targetConnection.socketId);
-                        if (targetSocket && ![...targetSocket.rooms].includes(finalRoomId)) {
-                            targetSocket.join(finalRoomId);
+                        for (const sid of targetConnection.socketIds) {
+                            const targetSocket = io.sockets.sockets.get(sid);
+                            if (targetSocket && ![...targetSocket.rooms].includes(finalRoomId)) {
+                                targetSocket.join(finalRoomId);
+                            }
                         }
                     }
 
@@ -197,7 +207,7 @@ function initializeSocket(io) {
                     }
 
                     const messageData = {
-                        content: message,
+                        // DO NOT persist plaintext `content`
                         messageType: 'text',
                         encryptedContent: encryptionResult.encrypted,
                         encryptionMetadata: {
@@ -219,6 +229,8 @@ function initializeSocket(io) {
 
                     try {
                         const newMessage = new Message(messageData);
+                        // Attach transient plaintext for integrity hash/counts (not persisted)
+                        newMessage._plainContent = message;
                         await newMessage.save();
                         console.log(`Message saved to database: ${newMessage._id}`);
 
@@ -226,8 +238,14 @@ function initializeSocket(io) {
                             id: newMessage._id.toString(),
                             content: newMessage.encryptedContent,
                             messageType: newMessage.messageType,
-                            sender: newMessage.sender,
-                            recipient: newMessage.recipient,
+                            sender: {
+                                userId: newMessage.sender.userId.toString(),
+                                username: newMessage.sender.username
+                            },
+                            recipient: {
+                                userId: newMessage.recipient.userId.toString(),
+                                username: newMessage.recipient.username
+                            },
                             roomId: newMessage.roomId,
                             status: newMessage.status,
                             deliveryStatus: newMessage.deliveryStatus,
@@ -251,30 +269,45 @@ function initializeSocket(io) {
                         // Handle message decryption requests
             socket.on('decrypt_message', async (data) => {
                 try {
-                    const { messageId, encryptedContent, senderId, targetUserId } = data;
+                    const { messageId, encryptedContent, senderId, targetUserId } = data || {};
 
-                    if (!encryptedContent || !senderId || !targetUserId) {
+                    const currentUserId = user._id.toString();
+
+                    let enc = encryptedContent;
+                    let sId = senderId;
+                    let tId = targetUserId;
+
+                    // If messageId is provided, trust DB values to avoid any mismatch from client
+                    if (messageId) {
+                        const msg = await Message.findById(messageId).lean();
+                        if (msg) {
+                            sId = msg.sender.userId.toString();
+                            tId = msg.recipient.userId.toString();
+                            enc = enc || msg.encryptedContent;
+                        }
+                    }
+
+                    if (!enc || !sId || !tId) {
                         socket.emit('error', { message: 'Missing required decryption parameters' });
                         return;
                     }
 
-                    // Verify user is authorized to decrypt (must be sender or recipient)
-                    const currentUserId = user._id.toString();
-                    if (currentUserId !== senderId && currentUserId !== targetUserId) {
+                    // Verify authorization (must be one of participants)
+                    if (currentUserId !== sId && currentUserId !== tId) {
                         socket.emit('error', { message: 'Unauthorized decryption attempt' });
                         return;
                     }
 
                     // Decrypt message using tunnel decryption
-                    const decryptionResult = tunnelDecrypt(encryptedContent, senderId, targetUserId);
+                    const decryptionResult = tunnelDecrypt(enc, sId, tId);
 
                     if (!decryptionResult.success) {
                         socket.emit('error', { message: 'Failed to decrypt message' });
                         return;
                     }
 
-                    // If messageId is provided, update delivery status
-                    if (messageId && currentUserId === targetUserId) {
+                    // If messageId exists and current user is the recipient, mark as read
+                    if (messageId && currentUserId === tId) {
                         try {
                             await Message.findByIdAndUpdate(messageId, {
                                 status: 'read',
@@ -391,8 +424,14 @@ function initializeSocket(io) {
                         id: updatedMessage._id.toString(),
                         content: updatedMessage.encryptedContent,
                         messageType: updatedMessage.messageType,
-                        sender: updatedMessage.sender,
-                        recipient: updatedMessage.recipient,
+                        sender: {
+                            userId: updatedMessage.sender.userId.toString(),
+                            username: updatedMessage.sender.username
+                        },
+                        recipient: {
+                            userId: updatedMessage.recipient.userId.toString(),
+                            username: updatedMessage.recipient.username
+                        },
                         roomId: updatedMessage.roomId,
                         status: updatedMessage.status,
                         metadata: {
@@ -530,50 +569,24 @@ function initializeSocket(io) {
                 }
             });
 
-            // Handle get online users
+            // Handle get online users (use live activeConnections instead of DB to avoid stale flags)
             socket.on('get_online_users', async () => {
                 try {
-                    const onlineUsers = await User.getOnlineUsers();
+                    const users = Array.from(activeConnections.values()).map(conn => ({
+                        id: conn.userId,
+                        username: conn.username,
+                        // lastSeen is approximated to now for active sockets
+                        lastSeen: new Date()
+                    }));
                     socket.emit('online_users', {
                         success: true,
-                        users: onlineUsers.map(u => ({
-                            id: u._id.toString(),
-                            username: u.username,
-                            lastSeen: u.lastSeen
-                        }))
+                        users
                     });
                 } catch (error) {
                     console.error('Get online users error:', error);
                     socket.emit('error', { message: 'Failed to fetch online users' });
                 }
             });
-
-            // Handle disconnection
-            socket.on('disconnect', async (reason) => {
-                try {
-                    console.log(`User ${user.username} disconnected: ${reason}`);
-                    
-                    // Remove from active connections
-                    activeConnections.delete(user._id.toString());
-                    
-                    // Update user offline status
-                    await User.findByIdAndUpdate(user._id, { 
-                        isOnline: false, 
-                        socketId: null,
-                        lastSeen: new Date()
-                    });
-                    
-                    // Notify other users about offline status
-                    socket.broadcast.emit('user_offline', {
-                        userId: user._id.toString(),
-                        username: user.username
-                    });
-
-                } catch (error) {
-                    console.error('Disconnect error:', error);
-                }
-            });
-
         } catch (error) {
             console.error('Socket connection error:', error);
             socket.emit('error', { message: 'Connection failed' });
@@ -633,8 +646,10 @@ function broadcastToAll(io, event, data) {
  */
 function sendToUser(io, userId, event, data) {
     const connection = activeConnections.get(userId);
-    if (connection) {
-        io.to(connection.socketId).emit(event, data);
+    if (connection && connection.socketIds && connection.socketIds.size > 0) {
+        for (const sid of connection.socketIds) {
+            io.to(sid).emit(event, data);
+        }
         return true;
     }
     return false;

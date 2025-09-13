@@ -15,6 +15,8 @@ dotenv.config({ path: path.resolve(__dirname, '.env') });
 // Import routes and handlers
 import authRoutes from './routes/auth.js';
 import { initializeSocket, getActiveConnectionsCount } from './socket/socketHandler.js';
+import User from './models/User.js';
+import Message from './models/Message.js';
 import { connectDB, isConnected } from './config/database.js';
 
 // Initialize Express app
@@ -65,6 +67,26 @@ const startServer = async () => {
     try {
         console.log('🔌 Connecting to MongoDB...');
         await connectDB();
+        
+        // Reset online status on server start to avoid stale flags
+        try {
+            const result = await User.updateMany({}, { isOnline: false, socketId: null });
+            console.log(`🧹 Reset online status for ${result.modifiedCount || result.nModified || 0} users`);
+        } catch (cleanupErr) {
+            console.warn('⚠️ Failed to reset user online status on startup:', cleanupErr.message);
+        }
+
+        // Drop legacy unique index on messages.id if it exists (causes E11000 dup key on null id)
+        try {
+            const indexes = await Message.collection.indexes();
+            const legacy = indexes.find(i => i.name === 'id_1');
+            if (legacy) {
+                await Message.collection.dropIndex('id_1');
+                console.log('🧹 Dropped legacy index messages.id_1');
+            }
+        } catch (idxErr) {
+            console.warn('⚠️ Index check/drop skipped or failed:', idxErr.message);
+        }
         
         // Add basic route for health check
         app.get('/health', (req, res) => {
