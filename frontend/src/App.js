@@ -14,15 +14,17 @@ function App() {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [isMobile, setIsMobile] = useState(false);
+  // Keep stable references to avoid duplicate listener registration
+  const messageHandlerRef = useRef(null);
+  const connectionHandlerRef = useRef(null);
 
+  // Mount-only: validate saved auth and connect once
   useEffect(() => {
-    // Check for existing authentication
     const savedUser = getCurrentUser();
     const savedToken = localStorage.getItem('authToken');
-    
+
     if (savedUser && savedToken) {
       console.log('🔑 Found saved authentication data, validating...');
-      // Validate token by making a test API call
       api.get('/api/auth/me')
         .then(response => {
           if (response.data.success) {
@@ -41,18 +43,24 @@ function App() {
     } else {
       console.log('ℹ️ No saved authentication data found');
     }
+  }, []);
 
-    // Check if mobile
+  // Mount-only: responsive check
+  useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth <= 768);
     };
-    
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Health + visibility: depends on auth state
+  useEffect(() => {
     // Add connection health check
     const healthCheckInterval = setInterval(() => {
-      if (currentUser && authToken && connectionStatus === 'connected') {
+      const status = socketService.getConnectionStatus();
+      if (currentUser && authToken && status.isConnected) {
         // Ping the server to check connection health
         api.get('/health')
           .then(response => {
@@ -62,9 +70,10 @@ function App() {
           })
           .catch(error => {
             console.warn('⚠️ Health check failed:', error.message);
-            // Try to reconnect if health check fails
-            if (connectionStatus === 'connected') {
-              console.log('🔄 Attempting to reconnect due to health check failure...');
+            // Only attempt reconnect if actually disconnected
+            const cur = socketService.getConnectionStatus();
+            if (!cur.isConnected) {
+              console.log('🔄 Attempting to reconnect (health check) ...');
               connectSocket(authToken);
             }
           });
@@ -75,21 +84,19 @@ function App() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && currentUser && authToken) {
         // When user comes back to the tab, check connection
-        if (connectionStatus !== 'connected') {
-          console.log('🔄 User returned to tab, checking connection...');
+        const status = socketService.getConnectionStatus();
+        if (!status.isConnected) {
+          console.log('🔄 User returned to tab, reconnecting...');
           connectSocket(authToken);
         }
       }
     };
-    
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
     return () => {
-      window.removeEventListener('resize', checkMobile);
       clearInterval(healthCheckInterval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentUser, authToken, connectionStatus]);
+  }, [currentUser, authToken]);
 
   // Connection attempt tracker
   const connectingRef = useRef(false);
@@ -118,7 +125,7 @@ function App() {
       setConnectionStatus('connected');
       console.log('✅ Socket connection successful');
       
-      // Setup socket event listeners (only once)
+      // Setup socket event listeners (deduped)
       const messageHandler = (event, data) => {
         switch (event) {
           case 'online_users':
@@ -153,8 +160,17 @@ function App() {
         }
       };
 
+      // Remove previous handlers if any to avoid accumulation
+      if (messageHandlerRef.current) {
+        socketService.offMessage(messageHandlerRef.current);
+      }
+      if (connectionHandlerRef.current) {
+        socketService.offConnection(connectionHandlerRef.current);
+      }
       socketService.onMessage(messageHandler);
       socketService.onConnection(connectionHandler);
+      messageHandlerRef.current = messageHandler;
+      connectionHandlerRef.current = connectionHandler;
 
       // Request online users
       socketService.getOnlineUsers();

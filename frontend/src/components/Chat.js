@@ -10,7 +10,12 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
   const [roomId, setRoomId] = useState(null);
   // Debug panel removed for cleaner UI
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const messagesRef = useRef([]); // Track latest messages to prevent stale closures
+  const inputRef = useRef(null);
+  const initialScrollDoneRef = useRef(false);
+  const roomIdRef = useRef(null);
 
   useEffect(() => {
     if (selectedUser) {
@@ -21,20 +26,22 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
       const handleMessage = (event, data) => {
         switch (event) {
           case 'room_joined':
-            setRoomId(data.roomId);
+            // Only update roomId if changed
+            setRoomId(prev => (prev !== data.roomId ? data.roomId : prev));
+            roomIdRef.current = data.roomId;
             addDebugLog('Joined secure tunnel', data);
-            
-            // Load previous messages if available
+
+            // Load/merge previous messages if available
             if (data.previousMessages && data.previousMessages.length > 0) {
               const previousMsgs = data.previousMessages.map(msg => ({
                 id: msg.id,
-                senderId: msg.sender.userId,
+                senderId: String(msg.sender.userId),
                 senderUsername: msg.sender.username,
-                targetUserId: msg.recipient.userId,
+                targetUserId: String(msg.recipient.userId),
                 text: '[ENCRYPTED]',
                 encryptedText: msg.content,
                 timestamp: msg.createdAt,
-                isOwn: msg.sender.userId === currentUser.id,
+                isOwn: String(msg.sender.userId) === String(currentUser.id) || msg.sender.username === currentUser.username,
                 encrypted: true,
                 messageType: msg.messageType,
                 status: msg.status,
@@ -42,17 +49,31 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                 metadata: msg.metadata,
                 encryptionMetadata: msg.encryptionMetadata
               }));
-              setMessages(previousMsgs);
+
+              // If we already have messages for the same room, merge instead of replacing
+              setMessages(prev => {
+                const existingIds = new Set(prev.map(m => m.id));
+                const toAdd = previousMsgs.filter(m => !existingIds.has(m.id));
+                const merged = prev.length > 0 && roomIdRef.current === data.roomId ? [...prev, ...toAdd] : previousMsgs;
+                return merged;
+              });
+
               addDebugLog(`Loaded ${previousMsgs.length} previous messages`, {
                 roomId: data.roomId
               });
-              
+
               // Auto-decrypt previous messages that this user can decrypt
               previousMsgs.forEach(msg => {
                 if (msg.senderId === currentUser.id || msg.targetUserId === currentUser.id) {
                   socketService.decryptMessage(msg.id, msg.encryptedText, msg.senderId, msg.targetUserId);
                 }
               });
+
+              // Avoid smooth scroll on initial hydrate
+              setTimeout(() => {
+                scrollToBottom();
+                initialScrollDoneRef.current = true;
+              }, 0);
             }
             break;
             
@@ -68,13 +89,13 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             // Add encrypted message to display
             const encryptedMsg = {
               id: data.id,
-              senderId: data.sender.userId,
+              senderId: String(data.sender.userId),
               senderUsername: data.sender.username,
-              targetUserId: data.recipient.userId,
+              targetUserId: String(data.recipient.userId),
               text: '[ENCRYPTED]',
               encryptedText: data.content,
               timestamp: data.createdAt,
-              isOwn: data.sender.userId === currentUser.id,
+              isOwn: String(data.sender.userId) === String(currentUser.id) || data.sender.username === currentUser.username,
               encrypted: true,
               messageType: data.messageType,
               status: data.status,
@@ -85,8 +106,13 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             setMessages(prev => [...prev, encryptedMsg]);
             
             // Auto-decrypt if this user can decrypt it
-            if (data.sender.userId === currentUser.id || data.recipient.userId === currentUser.id) {
-              socketService.decryptMessage(data.id, data.content, data.sender.userId, data.recipient.userId);
+            if (String(data.sender.userId) === String(currentUser.id) || String(data.recipient.userId) === String(currentUser.id)) {
+              socketService.decryptMessage(
+                data.id,
+                data.content,
+                String(data.sender.userId),
+                String(data.recipient.userId)
+              );
             }
             break;
             
@@ -196,11 +222,24 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
   }, [selectedUser, currentUser]);
 
   useEffect(() => {
-    scrollToBottom();
+    // Scroll only when there are messages; use container scroll to avoid layout jump
+    if (messages.length > 0) {
+      scrollToBottom();
+      if (!initialScrollDoneRef.current) {
+        initialScrollDoneRef.current = true;
+      }
+    }
+    messagesRef.current = messages;
   }, [messages]);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const c = messagesContainerRef.current;
+    if (c) {
+      c.scrollTop = c.scrollHeight;
+    } else {
+      // Fallback
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
   };
 
   const addDebugLog = () => {}; // No-op after removal
@@ -277,6 +316,11 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
       setNewMessage(messageText); // Restore message on error
     } finally {
       setLoading(false);
+      // Keep focus for rapid messaging (avoid on mobile to prevent layout jump)
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      if (!isMobile) {
+        inputRef.current?.focus();
+      }
     }
   };
 
@@ -342,7 +386,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
         </div>
       </div>
 
-      <div className="messages-container">
+      <div className="messages-container" ref={messagesContainerRef}>
         {messages.length === 0 ? (
           <div className="empty-state">
             <h3>Start your secure conversation</h3>
@@ -483,6 +527,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             placeholder={`Send encrypted message to ${selectedUser.username}...`}
             disabled={loading}
             maxLength={1000}
+            ref={inputRef}
           />
           <button 
             type="submit" 
@@ -493,8 +538,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
           </button>
         </form>
       </div>
-
-      {/* Debug panel removed */}
     </div>
   );
 };

@@ -34,7 +34,8 @@ body {
   font-family: 'Courier New', 'Consolas', 'Monaco', monospace;
   background: var(--background-dark);
   color: var(--primary-color);
-  height: 100vh;
+  /* Use small viewport height to reduce keyboard-induced jumps on mobile */
+  min-height: 100svh;
   width: 100vw;
   overflow-x: hidden;
   position: relative;
@@ -82,7 +83,8 @@ body::before {
 /* Main App Container - Always Centered */
 .app {
   position: relative;
-  min-height: 100vh;
+  /* Use svh to avoid viewport resize jumps on mobile keyboards */
+  min-height: 100svh;
   width: 100vw;
   display: flex;
   align-items: center;
@@ -688,6 +690,7 @@ body::before {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   background: rgba(13, 17, 23, 0.6);
 }
 
@@ -723,6 +726,49 @@ body::before {
   overflow-y: auto;
   padding: 1.5rem;
   background: rgba(13, 17, 23, 0.4);
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  /* Avoid browser scroll anchoring that can cause jumps when content above changes */
+  overflow-anchor: none;
+  /* Hide scrollbar cross-browser while keeping scroll functionality */
+  /* Firefox */
+  scrollbar-width: none;
+  /* IE/Edge (legacy) */
+  -ms-overflow-style: none;
+}
+
+/* WebKit (Chrome, Safari, new Edge) */
+.messages-container::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.messages-container::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+/* ========================================
+   OPTIONAL: Themed Scrollbar
+   To use the theme below, remove/override the "hide" rules above or add class 'thematic'
+   ======================================== */
+.messages-container.thematic::-webkit-scrollbar {
+  width: 8px;
+}
+.messages-container.thematic::-webkit-scrollbar-track {
+  background: rgba(13, 17, 23, 0.6);
+}
+.messages-container.thematic::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.5); /* KrishnaCrypt neon green */
+  border-radius: 8px;
+  border: 1px solid #00ff41;
+}
+.messages-container.thematic::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 65, 0.7);
+}
+
+/* Firefox themed variant */
+.messages-container.thematic {
+  scrollbar-width: thin;              /* thin, auto, none */
+  scrollbar-color: #00ff41 #0d1117;  /* thumb track */
 }
 
 .message {
@@ -799,6 +845,8 @@ body::before {
   padding: 1.5rem;
   border-top: 1px solid rgba(0, 255, 65, 0.3);
   background: rgba(22, 27, 34, 0.8);
+  position: sticky;
+  bottom: 0;
 }
 
 .input-container {
@@ -1315,9 +1363,15 @@ body::before {
    ======================================== */
 
 @media screen and (max-width: 768px) {
+  /* Avoid fixed background layer impacting viewport size */
+  body::before {
+    position: absolute;
+    height: 100svh;
+  }
   .container {
     max-width: 100%;
-    min-height: 100vh;
+    /* Use svh to avoid layout shift when mobile keyboard opens */
+    min-height: 100svh;
     border-radius: 0;
     border: none;
   }
@@ -1343,7 +1397,7 @@ body::before {
 
   .chat-container {
     flex-direction: column;
-    height: calc(100vh - 140px);
+    height: calc(100svh - 140px);
     min-height: auto;
   }
 
@@ -1548,7 +1602,7 @@ body::before {
   }
 
   .chat-area {
-    height: calc(100vh - 180px - 60px);
+    height: calc(100svh - 180px - 60px);
   }
 
   .message {
