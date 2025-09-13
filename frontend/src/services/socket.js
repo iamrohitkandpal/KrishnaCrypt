@@ -10,6 +10,11 @@ class SocketService {
     this.debugCallbacks = [];
     this._connectPromise = null; // Track ongoing connection attempts
     this._reconnectTimer = null; // Track reconnection timer
+    this._listenersAttached = false; // Guard to avoid duplicate listeners
+    // Room tracking
+    this._currentTargetUserId = null; // user we're chatting with
+    this._currentRoomId = null;       // server-assigned room id
+    this._lastJoinEmittedAt = 0;      // debounce join
   }
 
   connect(token) {
@@ -40,7 +45,8 @@ class SocketService {
     this.socket = io(serverUrl, {
       auth: { token },
       transports: ['websocket', 'polling'],
-      forceNew: true,
+      // Keep a single socket instance to avoid churn
+      forceNew: false,
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
@@ -66,8 +72,7 @@ class SocketService {
         reject(new Error('Connection timeout'));
       }, 20000);
 
-      // Setup all event listeners first
-      this.setupEventListeners();
+      // Listeners already attached above (guarded)
 
       // Then listen for connection events
       this.socket.on('connection_established', (data) => {
@@ -113,23 +118,42 @@ class SocketService {
   }
 
   setupEventListeners() {
+    // Prevent duplicate bindings
+    if (!this.socket || this._listenersAttached) {
+      return;
+    }
+    this._listenersAttached = true;
     // Connection events
     this.socket.on('connect', () => {
       this.log('Socket connected');
       this.isConnected = true;
       this.notifyConnectionCallbacks('connected');
+      // Re-join active room after a reconnect/connect
+      if (this._currentTargetUserId) {
+        // slight delay to ensure auth context is ready server-side
+        setTimeout(() => {
+          this._emitJoinRoom(this._currentTargetUserId);
+        }, 50);
+      }
     });
 
     this.socket.on('connection_established', (data) => {
       this.log('Connection established with server', data);
       this.isConnected = true;
       this.notifyConnectionCallbacks('connected', data);
+      if (this._currentTargetUserId) {
+        setTimeout(() => {
+          this._emitJoinRoom(this._currentTargetUserId);
+        }, 50);
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
       this.isConnected = false;
       this.log('Socket disconnected', reason);
       this.notifyConnectionCallbacks('disconnected', reason);
+      // Keep target for auto rejoin, but clear room id (server will reassign)
+      this._currentRoomId = null;
     });
 
     this.socket.on('connect_error', (error) => {
@@ -142,6 +166,11 @@ class SocketService {
       this.log('Reconnected after', attemptNumber, 'attempts');
       this.isConnected = true;
       this.notifyConnectionCallbacks('connected');
+      if (this._currentTargetUserId) {
+        setTimeout(() => {
+          this._emitJoinRoom(this._currentTargetUserId);
+        }, 50);
+      }
     });
 
     this.socket.on('reconnect_error', (error) => {
@@ -203,6 +232,8 @@ class SocketService {
     // Room events
     this.socket.on('room_joined', (data) => {
       this.log('Joined room', data);
+      // Track authoritative room id from server
+      this._currentRoomId = data?.roomId || null;
       this.notifyMessageCallbacks('room_joined', data);
     });
 
@@ -233,7 +264,25 @@ class SocketService {
     if (!this.isConnected) {
       throw new Error('Socket not connected');
     }
-    
+    // If already trying to chat with this user and we have a room, avoid duplicate join
+    if (this._currentTargetUserId === targetUserId && this._currentRoomId) {
+      this.log('Join skipped: already in room with target', { targetUserId, roomId: this._currentRoomId });
+      return;
+    }
+
+    // Track desired target and emit join (debounced)
+    this._currentTargetUserId = targetUserId;
+    this._emitJoinRoom(targetUserId);
+  }
+
+  _emitJoinRoom(targetUserId) {
+    const now = Date.now();
+    // Debounce rapid join attempts (e.g., due to multiple lifecycle events)
+    if (now - this._lastJoinEmittedAt < 200) {
+      this.log('Join debounced to prevent rapid re-joins');
+      return;
+    }
+    this._lastJoinEmittedAt = now;
     this.log('Joining room with user', targetUserId);
     this.socket.emit('join_room', { targetUserId });
   }
@@ -475,6 +524,7 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
+      this._listenersAttached = false;
       this.log('Socket disconnected manually');
     }
   }
