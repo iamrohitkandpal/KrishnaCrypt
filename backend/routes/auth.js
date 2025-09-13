@@ -223,9 +223,6 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        // Update online status
-        await user.setOnlineStatus(true);
-
         // Generate JWT token
         const token = generateToken(user);
 

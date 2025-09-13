@@ -2,10 +2,13 @@ import mongoose from 'mongoose';
 import { generateRoomId } from '../utils/encryption.js';
 
 const messageSchema = new mongoose.Schema({
-    // Core message data
+    // Core message data (do NOT persist plaintext)
+    // Kept for backward compatibility, but not required and not selected by default.
+    // We never set this field when creating/editing messages.
     content: {
         type: String,
-        required: true,
+        required: false,
+        select: false,
         maxlength: [5000, 'Message content cannot exceed 5000 characters']
     },
 
@@ -145,21 +148,36 @@ messageSchema.index({ createdAt: -1 }); // For general chronological queries
 
 // Pre-save middleware
 messageSchema.pre('save', async function(next) {
-    // Generate integrity hash
-    if (this.content && !this.security.integrityHash) {
-        const crypto = await import('crypto');
-        this.security.integrityHash = crypto.createHash('sha256')
-            .update(this.content)
-            .digest('hex');
-    }
+    try {
+        // Use transient _plainContent (set at runtime) or legacy content if present
+        const plain = this._plainContent || this.content;
 
-    // Set character and word counts
-    if (this.content) {
-        this.metadata.characterCount = this.content.length;
-        this.metadata.wordCount = this.content.split(/\s+/).filter(word => word.length > 0).length;
-    }
+        if (plain && !this.security.integrityHash) {
+            const crypto = await import('crypto');
+            this.security.integrityHash = crypto.createHash('sha256')
+                .update(plain)
+                .digest('hex');
+        }
 
-    next();
+        if (plain) {
+            this.metadata = this.metadata || {};
+            this.metadata.characterCount = plain.length;
+            this.metadata.wordCount = plain.split(/\s+/).filter(word => word.length > 0).length;
+        }
+
+        // Ensure plaintext is not persisted
+        if (this.isModified('content')) {
+            this.set('content', undefined, { strict: false });
+        }
+        // Also drop transient field if it exists
+        if (this._plainContent) {
+            delete this._plainContent;
+        }
+
+        next();
+    } catch (err) {
+        next(err);
+    }
 });
 
 // Static methods for message operations
@@ -205,7 +223,7 @@ messageSchema.statics = {
         return this.getRoomMessages(roomId, options);
     },
 
-    // Search messages
+    // Search messages (note: plaintext content is not stored; search by usernames only)
     async searchMessages(query, userId, options = {}) {
         const {
             limit = 20,
@@ -214,7 +232,7 @@ messageSchema.statics = {
             after = null
         } = options;
 
-        // Build search query
+        // Build search query (no plaintext content search)
         const searchQuery = {
             $and: [
                 // User must be sender or recipient
@@ -224,10 +242,9 @@ messageSchema.statics = {
                         { 'recipient.userId': userId }
                     ]
                 },
-                // Text search in content
+                // Text search in participant usernames only
                 {
                     $or: [
-                        { content: { $regex: query, $options: 'i' } },
                         { 'sender.username': { $regex: query, $options: 'i' } },
                         { 'recipient.username': { $regex: query, $options: 'i' } }
                     ]
@@ -328,13 +345,14 @@ messageSchema.statics = {
     // Edit message
     async editMessage(messageId, userId, newContent) {
         const updateData = {
-            content: newContent,
             'metadata.edited': true,
             'metadata.editedAt': new Date(),
-            'metadata.originalContent': this.content
+            // DO NOT store plaintext in originalContent
+            'metadata.characterCount': newContent.length,
+            'metadata.wordCount': newContent.split(/\s+/).filter(w => w.length > 0).length
         };
 
-        // Update integrity hash for new content
+        // Update integrity hash for new content (without storing plaintext)
         const crypto = await import('crypto');
         updateData['security.integrityHash'] = crypto.createHash('sha256')
             .update(newContent)
@@ -365,25 +383,18 @@ messageSchema.methods = {
         return (Date.now() - this.createdAt.getTime()) < DELETE_TIME_LIMIT;
     },
 
-    // Verify message integrity
-    async verifyIntegrity() {
+    // Verify message integrity with provided plaintext
+    async verifyIntegrity(plainText) {
         const crypto = await import('crypto');
         const currentHash = crypto.createHash('sha256')
-            .update(this.content)
+            .update(plainText || '')
             .digest('hex');
-
         return currentHash === this.security.integrityHash;
     },
 
-    // Get message summary for notifications
+    // Get message summary for notifications (no plaintext available)
     getNotificationSummary() {
-        let summary = this.content;
-
-        // Truncate long messages
-        if (summary.length > 100) {
-            summary = summary.substring(0, 97) + '...';
-        }
-
+        const summary = '[Encrypted message]';
         return {
             id: this._id,
             sender: this.sender.username,
