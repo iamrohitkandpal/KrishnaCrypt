@@ -289,6 +289,35 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     }
   };
 
+  const handleClearChat = () => {
+    if (!window.confirm(`Are you sure you want to clear all messages with ${selectedUser.username}? This action cannot be undone.`)) {
+      return;
+    }
+
+    // Clear messages from local state
+    setMessages([]);
+    
+    // Add a system message to indicate chat was cleared
+    const clearMessage = {
+      id: `clear_${Date.now()}`,
+      text: '🧹 Chat cleared by you',
+      timestamp: new Date().toISOString(),
+      isOwn: true,
+      encrypted: false,
+      senderId: currentUser.id,
+      senderUsername: currentUser.username,
+      messageType: 'system'
+    };
+    
+    setMessages([clearMessage]);
+    
+    addDebugLog('Chat cleared', { 
+      clearedBy: currentUser.username,
+      chatWith: selectedUser.username,
+      roomId 
+    });
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     
@@ -378,12 +407,28 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
         >
           ← Back
         </button>
-        <div>
+        <div style={{ flex: 1 }}>
           <h3>Chat with {selectedUser.username}</h3>
           <div className="encryption-status">
             Secure tunnel established {roomId && `(Room: ${roomId.slice(0, 8)}...)`}
           </div>
         </div>
+        <button 
+          className="btn btn-danger" 
+          onClick={handleClearChat}
+          style={{ 
+            padding: '8px 12px',
+            backgroundColor: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '12px'
+          }}
+          title="Clear all messages in this chat"
+        >
+          🧹 Clear Chat
+        </button>
       </div>
 
       <div className="messages-container" ref={messagesContainerRef}>
