@@ -17,7 +17,7 @@ import authRoutes from './routes/auth.js';
 import { initializeSocket, getActiveConnectionsCount } from './socket/socketHandler.js';
 import User from './models/User.js';
 import Message from './models/Message.js';
-import { connectDB, isConnected } from './config/database.js';
+import { connectDB, getConnectionStatus } from './config/database.js';
 
 // Initialize Express app
 const app = express();
@@ -25,18 +25,25 @@ const server = http.createServer(app);
 
 // Socket.io setup with CORS for React frontend
 const allowedOrigins = [
-    process.env.CLIENT_URL
+    process.env.CLIENT_URL || 'http://localhost:3000',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000'
 ].filter(Boolean);
 
 const io = new Server(server, {
     cors: {
         origin: (origin, callback) => {
+            console.log(`🌐 CORS request from origin: ${origin}`);
+            console.log(`🔍 Allowed origins: ${allowedOrigins.join(', ')}`);
+            
             // Allow requests with no origin (like mobile apps or curl requests)
             if (!origin) return callback(null, true);
             if (allowedOrigins.indexOf(origin) === -1) {
+                console.error(`❌ Origin ${origin} not allowed`);
                 const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
                 return callback(new Error(msg), false);
             }
+            console.log(`✅ Origin ${origin} allowed`);
             return callback(null, true);
         },
         methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -92,7 +99,7 @@ const startServer = async () => {
         app.get('/health', (req, res) => {
             res.status(200).json({
                 status: 'ok',
-                database: isConnected ? 'connected' : 'disconnected',
+                database: getConnectionStatus() ? 'connected' : 'disconnected',
                 timestamp: new Date().toISOString()
             });
         });
@@ -105,7 +112,7 @@ const startServer = async () => {
             console.log(`📍 Server running on port: ${PORT}`);
             console.log(`🌐 Environment: ${NODE_ENV}`);
             console.log(`🔗 API Base URL: http://localhost:${PORT}`);
-            console.log(`💾 Database: ${isConnected ? 'Connected' : 'Disconnected'}`);
+            console.log(`💾 Database: ${getConnectionStatus() ? 'Connected' : 'Disconnected'}`);
             console.log('='.repeat(50));
             
             // Initialize Socket.io after server starts
@@ -133,7 +140,7 @@ const startServer = async () => {
 
 // Middleware to check database connection
 app.use((req, res, next) => {
-    if (!isConnected && req.path !== '/health') {
+    if (!getConnectionStatus() && req.path !== '/health') {
         return res.status(503).json({
             success: false,
             message: 'Database connection not available',
@@ -146,12 +153,16 @@ app.use((req, res, next) => {
 // CORS Middleware
 app.use(cors({
     origin: (origin, callback) => {
+        console.log(`🌐 Express CORS request from origin: ${origin}`);
+        
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         if (allowedOrigins.indexOf(origin) === -1) {
+            console.error(`❌ Express Origin ${origin} not allowed`);
             const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
             return callback(new Error(msg), false);
         }
+        console.log(`✅ Express Origin ${origin} allowed`);
         return callback(null, true);
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],

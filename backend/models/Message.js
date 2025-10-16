@@ -181,9 +181,8 @@ messageSchema.pre('save', async function(next) {
 });
 
 // Static methods for message operations
-messageSchema.statics = {
-    // Get messages for a room with pagination
-    async getRoomMessages(roomId, options = {}) {
+// Get messages for a room with pagination
+messageSchema.statics.getRoomMessages = async function(roomId, options = {}) {
         const {
             limit = 50,
             before = null,
@@ -215,16 +214,16 @@ messageSchema.statics = {
             .lean();
 
         return messages.reverse(); // Return in chronological order
-    },
+};
 
-    // Get conversation between two users
-    async getConversation(userId1, userId2, options = {}) {
+// Get conversation between two users
+messageSchema.statics.getConversation = async function(userId1, userId2, options = {}) {
         const roomId = generateRoomId(userId1, userId2);
         return this.getRoomMessages(roomId, options);
-    },
+};
 
-    // Search messages (note: plaintext content is not stored; search by usernames only)
-    async searchMessages(query, userId, options = {}) {
+// Search messages (note: plaintext content is not stored; search by usernames only)
+messageSchema.statics.searchMessages = async function(query, userId, options = {}) {
         const {
             limit = 20,
             roomId = null,
@@ -270,10 +269,10 @@ messageSchema.statics = {
             .limit(limit)
             .populate('sender.userId', 'username')
             .populate('recipient.userId', 'username');
-    },
+};
 
-    // Mark messages as delivered
-    async markAsDelivered(messageIds, userId) {
+// Mark messages as delivered
+messageSchema.statics.markAsDelivered = async function(messageIds, userId) {
         return this.updateMany(
             {
                 _id: { $in: messageIds },
@@ -285,10 +284,10 @@ messageSchema.statics = {
                 'deliveryStatus.deliveredAt': new Date()
             }
         );
-    },
+};
 
-    // Mark messages as read
-    async markAsRead(messageIds, userId) {
+// Mark messages as read
+messageSchema.statics.markAsRead = async function(messageIds, userId) {
         return this.updateMany(
             {
                 _id: { $in: messageIds },
@@ -300,18 +299,18 @@ messageSchema.statics = {
                 'deliveryStatus.readAt': new Date()
             }
         );
-    },
+};
 
-    // Get unread message count
-    async getUnreadCount(userId) {
+// Get unread message count
+messageSchema.statics.getUnreadCount = async function(userId) {
         return this.countDocuments({
             'recipient.userId': userId,
             status: { $nin: ['read'] }
         });
-    },
+};
 
-    // Get unread messages for a conversation
-    async getUnreadMessages(userId, roomId = null) {
+// Get unread messages for a conversation
+messageSchema.statics.getUnreadMessages = async function(userId, roomId = null) {
         const query = {
             'recipient.userId': userId,
             status: { $nin: ['read'] }
@@ -324,10 +323,10 @@ messageSchema.statics = {
         return this.find(query)
             .sort({ createdAt: -1 })
             .populate('sender.userId', 'username');
-    },
+};
 
-    // Delete message (soft delete by marking as deleted)
-    async deleteMessage(messageId, userId) {
+// Delete message (soft delete by marking as deleted)
+messageSchema.statics.deleteMessage = async function(messageId, userId) {
         return this.updateOne(
             {
                 _id: messageId,
@@ -340,10 +339,10 @@ messageSchema.statics = {
                 'metadata.deletedBy': userId
             }
         );
-    },
+};
 
-    // Edit message
-    async editMessage(messageId, userId, newContent) {
+// Edit message
+messageSchema.statics.editMessage = async function(messageId, userId, newContent) {
         const updateData = {
             'metadata.edited': true,
             'metadata.editedAt': new Date(),
@@ -366,7 +365,6 @@ messageSchema.statics = {
             },
             updateData
         );
-    }
 };
 
 // Instance methods

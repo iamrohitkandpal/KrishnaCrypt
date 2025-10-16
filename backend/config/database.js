@@ -133,4 +133,5 @@ const connectDB = async () => {
 };
 
 // Export both the connect function and a helper to check connection status
-export { connectDB, isConnected };
+export { connectDB };
+export const getConnectionStatus = () => isConnected;
