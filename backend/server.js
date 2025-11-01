@@ -17,7 +17,7 @@ import authRoutes from './routes/auth.js';
 import { initializeSocket, getActiveConnectionsCount } from './socket/socketHandler.js';
 import User from './models/User.js';
 import Message from './models/Message.js';
-import { connectDB, getConnectionStatus } from './config/database.js';
+import { connectDB, getConnectionStatus, healthCheck, dbHealthMiddleware } from './config/database.js';
 
 // Initialize Express app
 const app = express();
@@ -95,13 +95,27 @@ const startServer = async () => {
             console.warn('⚠️ Index check/drop skipped or failed:', idxErr.message);
         }
         
-        // Add basic route for health check
-        app.get('/health', (req, res) => {
-            res.status(200).json({
-                status: 'ok',
-                database: getConnectionStatus() ? 'connected' : 'disconnected',
-                timestamp: new Date().toISOString()
-            });
+        // Add comprehensive health check route
+        app.get('/health', async (req, res) => {
+            try {
+                const dbHealth = await healthCheck();
+                res.status(dbHealth.healthy ? 200 : 503).json({
+                    status: dbHealth.healthy ? 'ok' : 'unhealthy',
+                    database: dbHealth,
+                    server: {
+                        uptime: process.uptime(),
+                        memory: process.memoryUsage(),
+                        activeConnections: getActiveConnectionsCount()
+                    },
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                res.status(503).json({
+                    status: 'error',
+                    error: error.message,
+                    timestamp: new Date().toISOString()
+                });
+            }
         });
 
         // Start the server
@@ -190,8 +204,8 @@ app.get('/health', (req, res) => {
     });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
+// API Routes with database health middleware
+app.use('/api/auth', dbHealthMiddleware, authRoutes);
 
 // Basic API info endpoint
 app.get('/api', (req, res) => {

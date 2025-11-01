@@ -62,12 +62,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                 roomId: data.roomId
               });
 
-              // Auto-decrypt previous messages that this user can decrypt
-              previousMsgs.forEach(msg => {
-                if (msg.senderId === currentUser.id || msg.targetUserId === currentUser.id) {
-                  socketService.decryptMessage(msg.id, msg.encryptedText, msg.senderId, msg.targetUserId);
-                }
-              });
+              // Don't auto-decrypt previous messages - let user manually decrypt
+              // This ensures decrypt button shows for all messages for educational purposes
 
               // Avoid smooth scroll on initial hydrate
               setTimeout(() => {
@@ -105,15 +101,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             };
             setMessages(prev => [...prev, encryptedMsg]);
             
-            // Auto-decrypt if this user can decrypt it
-            if (String(data.sender.userId) === String(currentUser.id) || String(data.recipient.userId) === String(currentUser.id)) {
-              socketService.decryptMessage(
-                data.id,
-                data.content,
-                String(data.sender.userId),
-                String(data.recipient.userId)
-              );
-            }
+            // Don't auto-decrypt - let user manually decrypt with button
+            // This ensures decrypt button always shows for educational purposes
             break;
             
           case 'message_decrypted':
@@ -157,10 +146,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
               return msg;
             }));
             
-            // Auto-decrypt the edited message
-            if (data.sender.userId === currentUser.id || data.recipient.userId === currentUser.id) {
-              socketService.decryptMessage(data.id, data.content, data.sender.userId, data.recipient.userId);
-            }
+            // Don't auto-decrypt edited messages - let user manually decrypt
+            // This ensures decrypt button shows for educational purposes
             break;
             
           case 'message_deleted':
