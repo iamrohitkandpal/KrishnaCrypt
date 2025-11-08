@@ -126,6 +126,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             }));
             break;
             
+          // TODO: Message editing and deletion events (Features temporarily disabled)
+          /*
           case 'message_edited':
             addDebugLog('Message edited', {
               messageId: data.id,
@@ -149,7 +151,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             // Don't auto-decrypt edited messages - let user manually decrypt
             // This ensures decrypt button shows for educational purposes
             break;
-            
+          
           case 'message_deleted':
             addDebugLog('Message deleted', {
               messageId: data.messageId,
@@ -159,6 +161,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
             // Remove the message from display
             setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
             break;
+          */
             
           case 'messages_read':
             addDebugLog('Messages marked as read', {
@@ -231,6 +234,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
 
   const addDebugLog = () => {}; // No-op after removal
 
+  // TODO: Edit and delete message handlers (Features temporarily disabled)
+  /*
   const handleEditMessage = async (message) => {
     const newContent = prompt('Edit your message:', message.text);
     if (newContent && newContent.trim() !== message.text) {
@@ -241,12 +246,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
           newLength: newContent.length
         });
 
-        // Send edit request to server
-        socketService.socket.emit('edit_message', {
-          messageId: message.id,
-          newContent: newContent.trim(),
-          roomId: roomId
-        });
+        // Send edit request using socket service
+        socketService.editMessage(message.id, newContent.trim(), roomId);
 
       } catch (error) {
         console.error('Error editing message:', error);
@@ -263,11 +264,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
           contentLength: message.text.length
         });
 
-        // Send delete request to server
-        socketService.socket.emit('delete_message', {
-          messageId: message.id,
-          roomId: roomId
-        });
+        // Send delete request using socket service
+        socketService.deleteMessage(message.id, roomId);
 
       } catch (error) {
         console.error('Error deleting message:', error);
@@ -275,6 +273,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
       }
     }
   };
+  */
 
   const handleClearChat = () => {
     if (!window.confirm(`Are you sure you want to clear all messages with ${selectedUser.username}? This action cannot be undone.`)) {
@@ -487,7 +486,8 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                     )}
                   </div>
                   
-                  {/* Message actions (edit/delete for own messages) */}
+                  {/* TODO: Message actions (edit/delete for own messages) - Features temporarily disabled */}
+                  {/*
                   {message.isOwn && !message.encrypted && (
                     <div className="message-actions" style={{ 
                       marginTop: '5px', 
@@ -526,6 +526,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                       </button>
                     </div>
                   )}
+                  */}
                 </div>
                 <div className="message-timestamp">
                   {formatTimestamp(message.timestamp)}

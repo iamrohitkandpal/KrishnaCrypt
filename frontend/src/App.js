@@ -3,7 +3,7 @@ import Login from './components/Login';
 import UserList from './components/UserList';
 import Chat from './components/Chat';
 import socketService from './services/socket';
-import { getCurrentUser, removeAuthToken } from './services/api';
+import { getCurrentUser, removeAuthToken, authAPI } from './services/api';
 import api from './services/api';
 import './index.css';
 
@@ -197,14 +197,25 @@ function App() {
     await connectSocket(token);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      // Call logout API to update server-side status
+      await authAPI.logout();
+    } catch (error) {
+      console.warn('Logout API call failed:', error);
+      // Continue with client-side logout even if API fails
+    }
+    
+    // Disconnect socket and clear client-side data
     socketService.disconnect();
     removeAuthToken();
     setCurrentUser(null);
     setAuthToken(null);
     setSelectedUser(null);
-    setOnlineUsers([]);
+    setOnlineUsers([]); // Clear online users list
     setConnectionStatus('disconnected');
+    
+    console.log('🔓 User logged out successfully');
   };
 
   const handleUserSelect = (user) => {

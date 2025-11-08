@@ -40,17 +40,34 @@ const UserList = ({ currentUser, onUserSelect, selectedUser, onlineUsers = [] })
 
   useEffect(() => {
     // Update online status when onlineUsers prop changes
-    if (onlineUsers.length > 0) {
+    if (onlineUsers && onlineUsers.length >= 0) { // Check for array (including empty)
       setFriends(prevFriends =>
         prevFriends.map(friend => ({
           ...friend,
-          isOnline: onlineUsers.some(onlineUser => onlineUser.id === friend.id)
+          isOnline: onlineUsers.some(onlineUser => 
+            (onlineUser.id || onlineUser._id) === (friend.id || friend._id)
+          )
+        }))
+      );
+    } else {
+      // If no online users data, mark all as offline
+      setFriends(prevFriends =>
+        prevFriends.map(friend => ({
+          ...friend,
+          isOnline: false
         }))
       );
     }
   }, [onlineUsers]);
 
+  // Fetch friends list from API
   const fetchFriends = async () => {
+    // Don't fetch if not properly initialized
+    if (!currentUser) {
+      console.warn('⚠️ No current user, skipping friends fetch');
+      return;
+    }
+    
     try {
       setLoading(true);
       console.log('🔍 Fetching friends list...');
