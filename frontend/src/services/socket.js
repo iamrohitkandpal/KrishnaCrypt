@@ -189,6 +189,8 @@ class SocketService {
       this.notifyMessageCallbacks('message_decrypted', data);
     });
 
+    // TODO: Message editing events (Feature temporarily disabled)
+    /*
     this.socket.on('message_edited', (data) => {
       this.log('Message edited', data);
       this.notifyMessageCallbacks('message_edited', data);
@@ -198,6 +200,7 @@ class SocketService {
       this.log('Message deleted', data);
       this.notifyMessageCallbacks('message_deleted', data);
     });
+    */
 
     this.socket.on('messages_read', (data) => {
       this.log('Messages marked as read', data);
@@ -341,7 +344,8 @@ class SocketService {
     this.socket.emit('mark_messages_read', data);
   }
 
-  // Edit message
+  // TODO: Edit message (Feature temporarily disabled)
+  /*
   editMessage(messageId, newContent, roomId) {
     if (!this.isConnected) {
       throw new Error('Socket not connected');
@@ -356,8 +360,10 @@ class SocketService {
     this.log('Editing message', data);
     this.socket.emit('edit_message', data);
   }
+  */
 
-  // Delete message
+  // TODO: Delete message (Feature temporarily disabled)
+  /*
   deleteMessage(messageId, roomId) {
     if (!this.isConnected) {
       throw new Error('Socket not connected');
@@ -371,6 +377,7 @@ class SocketService {
     this.log('Deleting message', data);
     this.socket.emit('delete_message', data);
   }
+  */
 
   // Search messages
   searchMessages(query, roomId = null, limit = 20) {

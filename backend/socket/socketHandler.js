@@ -587,6 +587,162 @@ function initializeSocket(io) {
                     socket.emit('error', { message: 'Failed to fetch online users' });
                 }
             });
+
+            // TODO: Handle message editing (Feature temporarily disabled)
+            /*
+            socket.on('edit_message', async (data) => {
+                try {
+                    const { messageId, newContent, roomId } = data;
+
+                    if (!messageId || !newContent || !roomId) {
+                        socket.emit('error', { message: 'Message ID, content, and room ID are required' });
+                        return;
+                    }
+
+                    // Find the message
+                    const message = await Message.findById(messageId);
+                    if (!message) {
+                        socket.emit('error', { message: 'Message not found' });
+                        return;
+                    }
+
+                    // Check if user owns the message
+                    if (message.sender.userId.toString() !== user._id.toString()) {
+                        socket.emit('error', { message: 'You can only edit your own messages' });
+                        return;
+                    }
+
+                    // Check if message is too old to edit (optional: 24 hours limit)
+                    const messageAge = Date.now() - new Date(message.createdAt).getTime();
+                    const editTimeLimit = 24 * 60 * 60 * 1000; // 24 hours
+                    if (messageAge > editTimeLimit) {
+                        socket.emit('error', { message: 'Message is too old to edit' });
+                        return;
+                    }
+
+                    // Encrypt the new content
+                    const encryptionResult = tunnelEncrypt(
+                        newContent,
+                        message.sender.userId.toString(),
+                        message.recipient.userId.toString()
+                    );
+
+                    if (!encryptionResult.success) {
+                        socket.emit('error', { message: 'Failed to encrypt edited message' });
+                        return;
+                    }
+
+                    // Update the message
+                    message.encryptedContent = encryptionResult.encrypted;
+                    message.metadata = {
+                        ...message.metadata,
+                        edited: true,
+                        editedAt: new Date(),
+                        editCount: (message.metadata?.editCount || 0) + 1
+                    };
+                    message.encryptionMetadata = encryptionResult.metadata;
+
+                    await message.save();
+
+                    // Broadcast the edited message to room participants
+                    io.to(roomId).emit('message_edited', {
+                        id: message._id.toString(),
+                        content: encryptionResult.encrypted,
+                        metadata: message.metadata,
+                        encryptionMetadata: encryptionResult.metadata,
+                        editedAt: message.metadata.editedAt
+                    });
+
+                    console.log(`Message ${messageId} edited by ${user.username}`);
+
+                } catch (error) {
+                    console.error('Edit message error:', error);
+                    socket.emit('error', { message: 'Failed to edit message' });
+                }
+            });
+            */
+
+            // TODO: Handle message deletion (Feature temporarily disabled)
+            /*
+            socket.on('delete_message', async (data) => {
+                try {
+                    const { messageId, roomId } = data;
+
+                    if (!messageId || !roomId) {
+                        socket.emit('error', { message: 'Message ID and room ID are required' });
+                        return;
+                    }
+
+                    // Find the message
+                    const message = await Message.findById(messageId);
+                    if (!message) {
+                        socket.emit('error', { message: 'Message not found' });
+                        return;
+                    }
+
+                    // Check if user owns the message
+                    if (message.sender.userId.toString() !== user._id.toString()) {
+                        socket.emit('error', { message: 'You can only delete your own messages' });
+                        return;
+                    }
+
+                    // Delete the message from database
+                    await Message.findByIdAndDelete(messageId);
+
+                    // Broadcast the deletion to room participants
+                    io.to(roomId).emit('message_deleted', {
+                        messageId: messageId,
+                        deletedBy: user.username,
+                        deletedAt: new Date()
+                    });
+
+                    console.log(`Message ${messageId} deleted by ${user.username}`);
+
+                } catch (error) {
+                    console.error('Delete message error:', error);
+                    socket.emit('error', { message: 'Failed to delete message' });
+                }
+            });
+            */
+
+            // Handle socket disconnection
+            socket.on('disconnect', async (reason) => {
+                try {
+                    const uid = user._id.toString();
+                    console.log(`User ${user.username} disconnected (${reason}), socket ID: ${socket.id}`);
+
+                    // Remove this socket from active connections
+                    const connection = activeConnections.get(uid);
+                    if (connection) {
+                        connection.socketIds.delete(socket.id);
+                        
+                        // If no more sockets for this user, mark as offline
+                        if (connection.socketIds.size === 0) {
+                            activeConnections.delete(uid);
+                            
+                            // Update database status
+                            await User.findByIdAndUpdate(user._id, {
+                                isOnline: false,
+                                lastSeen: new Date(),
+                                socketId: null
+                            });
+
+                            // Broadcast user offline status
+                            socket.broadcast.emit('user_offline', {
+                                userId: uid,
+                                username: user.username,
+                                lastSeen: new Date()
+                            });
+
+                            console.log(`User ${user.username} marked as offline`);
+                        } else {
+                            console.log(`User ${user.username} still has ${connection.socketIds.size} active connection(s)`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Disconnect handling error:', error);
+                }
+            });
         } catch (error) {
             console.error('Socket connection error:', error);
             socket.emit('error', { message: 'Connection failed' });
