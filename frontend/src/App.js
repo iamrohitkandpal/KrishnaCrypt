@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
-import Login from './components/Login';
-import UserList from './components/UserList';
-import Chat from './components/Chat';
-import socketService from './services/socket';
-import { getCurrentUser, removeAuthToken, authAPI } from './services/api';
-import api from './services/api';
-import './index.css';
+import React, { useState, useEffect, useRef } from "react";
+import Login from "./components/Login";
+import UserList from "./components/UserList";
+import Chat from "./components/Chat";
+import socketService from "./services/socket";
+import { getCurrentUser, removeAuthToken, authAPI } from "./services/api";
+import api from "./services/api";
+import "./index.css";
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authToken, setAuthToken] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [isMobile, setIsMobile] = useState(false);
   // Keep stable references to avoid duplicate listener registration
   const messageHandlerRef = useRef(null);
@@ -21,27 +21,31 @@ function App() {
   // Mount-only: validate saved auth and connect once
   useEffect(() => {
     const savedUser = getCurrentUser();
-    const savedToken = localStorage.getItem('authToken');
+    const savedToken = localStorage.getItem("authToken");
 
     if (savedUser && savedToken) {
-      console.log('🔑 Found saved authentication data, validating...');
-      api.get('/api/auth/me')
-        .then(response => {
+      console.log("🔑 Found saved authentication data, validating...");
+      api
+        .get("/api/auth/me")
+        .then((response) => {
           if (response.data.success) {
-            console.log('✅ Token is valid, connecting...');
+            console.log("✅ Token is valid, connecting...");
             setCurrentUser(savedUser);
             setAuthToken(savedToken);
             connectSocket(savedToken);
           } else {
-            throw new Error('Invalid token response');
+            throw new Error("Invalid token response");
           }
         })
-        .catch(error => {
-          console.log('❌ Token validation failed, clearing data:', error.message);
+        .catch((error) => {
+          console.log(
+            "❌ Token validation failed, clearing data:",
+            error.message
+          );
           removeAuthToken();
         });
     } else {
-      console.log('ℹ️ No saved authentication data found');
+      console.log("ℹ️ No saved authentication data found");
     }
   }, []);
 
@@ -51,8 +55,8 @@ function App() {
       setIsMobile(window.innerWidth <= 768);
     };
     checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
   // Health + visibility: depends on auth state
@@ -62,39 +66,40 @@ function App() {
       const status = socketService.getConnectionStatus();
       if (currentUser && authToken && status.isConnected) {
         // Ping the server to check connection health
-        api.get('/health')
-          .then(response => {
+        api
+          .get("/health")
+          .then((response) => {
             if (!response.data.database) {
-              console.warn('⚠️ Database connection issue detected');
+              console.warn("⚠️ Database connection issue detected");
             }
           })
-          .catch(error => {
-            console.warn('⚠️ Health check failed:', error.message);
+          .catch((error) => {
+            console.warn("⚠️ Health check failed:", error.message);
             // Only attempt reconnect if actually disconnected
             const cur = socketService.getConnectionStatus();
             if (!cur.isConnected) {
-              console.log('🔄 Attempting to reconnect (health check) ...');
+              console.log("🔄 Attempting to reconnect (health check) ...");
               connectSocket(authToken);
             }
           });
       }
     }, 30000); // Check every 30 seconds
-    
+
     // Add visibility change handler for better connection management
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && currentUser && authToken) {
+      if (document.visibilityState === "visible" && currentUser && authToken) {
         // When user comes back to the tab, check connection
         const status = socketService.getConnectionStatus();
         if (!status.isConnected) {
-          console.log('🔄 User returned to tab, reconnecting...');
+          console.log("🔄 User returned to tab, reconnecting...");
           connectSocket(authToken);
         }
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       clearInterval(healthCheckInterval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [currentUser, authToken]);
 
@@ -104,58 +109,62 @@ function App() {
   const connectSocket = async (token) => {
     // Prevent multiple simultaneous connection attempts
     if (connectingRef.current) {
-      console.log('🔄 Connection attempt already in progress, skipping...');
+      console.log("🔄 Connection attempt already in progress, skipping...");
       return;
     }
 
     try {
       connectingRef.current = true;
-      console.log('🔌 Starting socket connection process...');
-      setConnectionStatus('connecting');
-      
+      console.log("🔌 Starting socket connection process...");
+      setConnectionStatus("connecting");
+
       // Validate token before attempting socket connection
       if (!token) {
-        throw new Error('No authentication token provided');
+        throw new Error("No authentication token provided");
       }
-      
-      console.log('🔑 Token found, attempting socket connection...');
+
+      console.log("🔑 Token found, attempting socket connection...");
       await socketService.connect(token);
-      
+
       // Only update state if still mounting/mounted
-      setConnectionStatus('connected');
-      console.log('✅ Socket connection successful');
-      
+      setConnectionStatus("connected");
+      console.log("✅ Socket connection successful");
+
       // Setup socket event listeners (deduped)
       const messageHandler = (event, data) => {
         switch (event) {
-          case 'online_users':
-            console.log('👥 Online users updated:', data.users);
+          case "online_users":
+            console.log("👥 Online users updated:", data.users);
             setOnlineUsers(data.users || []);
             break;
-          case 'user_offline':
-            console.log('👤 User went offline:', data);
-            setOnlineUsers(prev => 
-              prev.filter(user => user.id !== data.userId)
+          case "user_offline":
+            console.log("👤 User went offline:", data);
+            setOnlineUsers((prev) =>
+              prev.filter((user) => user.id !== data.userId)
             );
             break;
-          case 'room_joined':
-            console.log('🏠 Joined room:', data);
+          case "room_joined":
+            console.log("🏠 Joined room:", data);
             break;
-          case 'new_message':
-            console.log('💬 New message received');
+          case "new_message":
+            console.log("💬 New message received");
             break;
           default:
-            console.log('📡 Socket event:', event, data);
+            console.log("📡 Socket event:", event, data);
         }
       };
 
       const connectionHandler = (event, data) => {
-        console.log('🔄 Socket connection event:', event, data);
+        console.log("🔄 Socket connection event:", event, data);
         setConnectionStatus(event);
-        
+
         // If reconnected, refresh friends list and online users
-        if (event === 'connected' && data && !data.message?.includes('fallback')) {
-          console.log('🔄 Reconnected, refreshing data...');
+        if (
+          event === "connected" &&
+          data &&
+          !data.message?.includes("fallback")
+        ) {
+          console.log("🔄 Reconnected, refreshing data...");
           socketService.getOnlineUsers();
         }
       };
@@ -174,14 +183,16 @@ function App() {
 
       // Request online users
       socketService.getOnlineUsers();
-      
     } catch (error) {
-      console.error('❌ Socket connection failed:', error);
-      setConnectionStatus('error');
-      
+      console.error("❌ Socket connection failed:", error);
+      setConnectionStatus("error");
+
       // If authentication failed, clear stored data
-      if (error.message.includes('Authentication') || error.message.includes('token')) {
-        console.log('🔄 Clearing invalid authentication data...');
+      if (
+        error.message.includes("Authentication") ||
+        error.message.includes("token")
+      ) {
+        console.log("🔄 Clearing invalid authentication data...");
         removeAuthToken();
         setCurrentUser(null);
         setAuthToken(null);
@@ -202,10 +213,10 @@ function App() {
       // Call logout API to update server-side status
       await authAPI.logout();
     } catch (error) {
-      console.warn('Logout API call failed:', error);
+      console.warn("Logout API call failed:", error);
       // Continue with client-side logout even if API fails
     }
-    
+
     // Disconnect socket and clear client-side data
     socketService.disconnect();
     removeAuthToken();
@@ -213,9 +224,9 @@ function App() {
     setAuthToken(null);
     setSelectedUser(null);
     setOnlineUsers([]); // Clear online users list
-    setConnectionStatus('disconnected');
-    
-    console.log('🔓 User logged out successfully');
+    setConnectionStatus("disconnected");
+
+    console.log("🔓 User logged out successfully");
   };
 
   const handleUserSelect = (user) => {
@@ -240,13 +251,16 @@ function App() {
             <div className="header">
               <h1>🔐 KrishnaCrypt</h1>
               <div className="subtitle">
-                Status: {connectionStatus === 'connected' ? '🟢 Connected' : '🔴 Disconnected'}
+                Status:{" "}
+                {connectionStatus === "connected"
+                  ? "🟢 Connected"
+                  : "🔴 Disconnected"}
               </div>
               <button className="logout-btn" onClick={handleLogout}>
                 Logout
               </button>
             </div>
-            <Chat 
+            <Chat
               currentUser={currentUser}
               selectedUser={selectedUser}
               onBack={handleBackToUserList}
@@ -261,13 +275,16 @@ function App() {
             <div className="header">
               <h1>🔐 KrishnaCrypt</h1>
               <div className="subtitle">
-                Welcome, {currentUser.username} | Status: {connectionStatus === 'connected' ? '🟢 Connected' : '🔴 Disconnected'}
+                Welcome, {currentUser.username} | Status:{" "}
+                {connectionStatus === "connected"
+                  ? "🟢 Connected"
+                  : "🔴 Disconnected"}
               </div>
               <button className="logout-btn" onClick={handleLogout}>
                 Logout
               </button>
             </div>
-            <UserList 
+            <UserList
               currentUser={currentUser}
               onUserSelect={handleUserSelect}
               selectedUser={selectedUser}
@@ -286,7 +303,10 @@ function App() {
         <div className="header">
           <h1>🔐 KrishnaCrypt</h1>
           <div className="subtitle">
-            Welcome, {currentUser.username} | Status: {connectionStatus === 'connected' ? '🟢 Connected' : '🔴 Disconnected'}
+            Welcome, {currentUser.username} | Status:{" "}
+            {connectionStatus === "connected"
+              ? "🟢 Connected"
+              : "🔴 Disconnected"}
           </div>
           <button className="logout-btn" onClick={handleLogout}>
             Logout
@@ -294,14 +314,14 @@ function App() {
         </div>
 
         <div className="chat-container">
-          <UserList 
+          <UserList
             currentUser={currentUser}
             onUserSelect={handleUserSelect}
             selectedUser={selectedUser}
             onlineUsers={onlineUsers}
           />
-          
-          <Chat 
+
+          <Chat
             currentUser={currentUser}
             selectedUser={selectedUser}
             onBack={handleBackToUserList}
@@ -309,21 +329,26 @@ function App() {
         </div>
 
         {/* Connection Status Indicator */}
-        {connectionStatus !== 'connected' && (
-          <div style={{
-            position: 'fixed',
-            bottom: '20px',
-            left: '20px',
-            background: connectionStatus === 'connecting' ? '#ffc107' : '#dc3545',
-            color: 'white',
-            padding: '10px 15px',
-            borderRadius: '6px',
-            fontSize: '14px',
-            zIndex: 1000
-          }}>
-            {connectionStatus === 'connecting' && '🔄 Connecting to secure tunnel...'}
-            {connectionStatus === 'disconnected' && '🔴 Disconnected from server'}
-            {connectionStatus === 'error' && '❌ Connection failed'}
+        {connectionStatus !== "connected" && (
+          <div
+            style={{
+              position: "fixed",
+              bottom: "20px",
+              left: "20px",
+              background:
+                connectionStatus === "connecting" ? "#ffc107" : "#dc3545",
+              color: "white",
+              padding: "10px 15px",
+              borderRadius: "6px",
+              fontSize: "14px",
+              zIndex: 1000,
+            }}
+          >
+            {connectionStatus === "connecting" &&
+              "🔄 Connecting to secure tunnel..."}
+            {connectionStatus === "disconnected" &&
+              "🔴 Disconnected from server"}
+            {connectionStatus === "error" && "❌ Connection failed"}
           </div>
         )}
       </div>

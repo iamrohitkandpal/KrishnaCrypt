@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import socketService from '../services/socket';
+import DebugPanel from './DebugPanel';
 
 const Chat = ({ currentUser, selectedUser, onBack }) => {
   const [messages, setMessages] = useState([]);
@@ -8,30 +9,115 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState(null);
   const [roomId, setRoomId] = useState(null);
-  // Debug panel removed for cleaner UI
+  
+  const [debugLogs, setDebugLogs] = useState([]);
+  const [debugVisible, setDebugVisible] = useState(true);
+
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-  const messagesRef = useRef([]); // Track latest messages to prevent stale closures
+  const messagesRef = useRef([]);
   const inputRef = useRef(null);
   const initialScrollDoneRef = useRef(false);
   const roomIdRef = useRef(null);
 
+  const addDebugLog = (message, data) => {
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      message, 
+      data,
+      id: Date.now() + Math.random()
+    };
+
+    setDebugLogs(prev => [...prev, logEntry].slice(-50));
+    console.log(`[DEBUG ${timestamp}] ${message}:`, data); 
+  }; 
+
+  const handleClearDebugLogs = () => {
+    setDebugLogs([]);
+    addDebugLog('Debug panel cleared', { clearedAt: new Date().toISOString() });
+  };
+
+  const toggleDebugPanel = () => {
+    setDebugVisible(prev => !prev);
+  };
+
   useEffect(() => {
     if (selectedUser) {
-      // Join room with selected user
       socketService.joinRoom(selectedUser.id);
+
+      addDebugLog('Joining room', {
+        targetUser: selectedUser.username,
+        targetUserId: selectedUser.id,
+      });
       
+      const handleRoomJoined = (data) => {
+        console.log('Room Joined:', data);
+        setRoomId(data.roomId);
+        roomIdRef.current = data.roomId;
+
+        addDebugLog('Room joined successfully', {
+          roomId: data.roomId,
+          algorithm: 'KrishnaGuard-128-CBC',
+          tunnelStatus: 'active'
+        });
+
+        if (data.messages && data.messages.length > 0) {
+          const formattedMessages = data.messages.map(msg => ({
+            id: msg._id,
+            text: msg.decryptedContent || msg.content || '[Encrypted]',
+            sender: msg.sender.username,
+            senderId: msg.sender.userId,
+            timestamp: msg.createdAt,
+            encrypted: !!msg.encryptedContent,
+            encryptionMetadata: msg.encryptionMetadata
+          }));
+
+          setMessages(formattedMessages);
+          messagesRef.current = formattedMessages;
+
+          addDebugLog('Message history loaded', {
+            count: formattedMessages.length,
+            encrypted: formattedMessages.filter(m => m.encrypted).length 
+          });
+        }
+      };
+
+      const handleNewMessage = (data) => {
+        console.log('New Message received:', data);
+        addDebugLog('Message received', {
+          from: data.sender.username,
+          encrypted: true,
+          algorithm: data.encryptionMetadata?.algorithm,
+          decrypted: !!data.decryptedContent, 
+        });
+
+        const newMsg = {
+          id: data._id,
+          text: data.decryptedContent || data.content || '[Encrypted]',
+          sender: data.sender.username,
+          senderId: data.sender.userId,
+          timestamp: data.createdAt,
+          encrypted: !!data.encryptedContent,
+          encryptionMetadata: data.encryptionMetadata
+        };
+
+        setMessages(prev => {
+          const updated = [...prev, newMsg];
+          messagesRef.current = updated;
+          return updated;
+        });
+      };
+
       // Setup message listeners
       const handleMessage = (event, data) => {
         switch (event) {
           case 'room_joined':
-            // Only update roomId if changed
             setRoomId(prev => (prev !== data.roomId ? data.roomId : prev));
             roomIdRef.current = data.roomId;
             addDebugLog('Joined secure tunnel', data);
 
-            // Load/merge previous messages if available
             if (data.previousMessages && data.previousMessages.length > 0) {
               const previousMsgs = data.previousMessages.map(msg => ({
                 id: msg.id,
@@ -50,7 +136,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                 encryptionMetadata: msg.encryptionMetadata
               }));
 
-              // If we already have messages for the same room, merge instead of replacing
               setMessages(prev => {
                 const existingIds = new Set(prev.map(m => m.id));
                 const toAdd = previousMsgs.filter(m => !existingIds.has(m.id));
@@ -62,10 +147,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                 roomId: data.roomId
               });
 
-              // Don't auto-decrypt previous messages - let user manually decrypt
-              // This ensures decrypt button shows for all messages for educational purposes
-
-              // Avoid smooth scroll on initial hydrate
               setTimeout(() => {
                 scrollToBottom();
                 initialScrollDoneRef.current = true;
@@ -82,7 +163,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
               status: data.status
             });
             
-            // Add encrypted message to display
             const encryptedMsg = {
               id: data.id,
               senderId: String(data.sender.userId),
@@ -100,9 +180,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
               encryptionMetadata: data.encryptionMetadata
             };
             setMessages(prev => [...prev, encryptedMsg]);
-            
-            // Don't auto-decrypt - let user manually decrypt with button
-            // This ensures decrypt button always shows for educational purposes
             break;
             
           case 'message_decrypted':
@@ -112,56 +189,18 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
               algorithm: data.encryptionMetadata?.algorithm
             });
             
-            // Update the encrypted message with decrypted text
             setMessages(prev => prev.map(msg => {
               if (msg.id === data.messageId) {
                 return {
                   ...msg,
                   text: data.decryptedContent,
                   encrypted: false,
-                  status: msg.isOwn ? msg.status : 'read' // Mark as read when decrypted
+                  status: msg.isOwn ? msg.status : 'read'
                 };
               }
               return msg;
             }));
             break;
-            
-          // TODO: Message editing and deletion events (Features temporarily disabled)
-          /*
-          case 'message_edited':
-            addDebugLog('Message edited', {
-              messageId: data.id,
-              edited: data.metadata?.edited
-            });
-            
-            // Update the message with edited content
-            setMessages(prev => prev.map(msg => {
-              if (msg.id === data.id) {
-                return {
-                  ...msg,
-                  text: '[ENCRYPTED]', // Reset to encrypted state
-                  encryptedText: data.content,
-                  encrypted: true,
-                  metadata: data.metadata
-                };
-              }
-              return msg;
-            }));
-            
-            // Don't auto-decrypt edited messages - let user manually decrypt
-            // This ensures decrypt button shows for educational purposes
-            break;
-          
-          case 'message_deleted':
-            addDebugLog('Message deleted', {
-              messageId: data.messageId,
-              deletedBy: data.deletedBy
-            });
-            
-            // Remove the message from display
-            setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
-            break;
-          */
             
           case 'messages_read':
             addDebugLog('Messages marked as read', {
@@ -169,7 +208,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
               readBy: data.readBy
             });
             
-            // Update message status to read
             setMessages(prev => prev.map(msg => {
               if (data.messageIds.includes(msg.id)) {
                 return {
@@ -212,7 +250,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
   }, [selectedUser, currentUser]);
 
   useEffect(() => {
-    // Scroll only when there are messages; use container scroll to avoid layout jump
     if (messages.length > 0) {
       scrollToBottom();
       if (!initialScrollDoneRef.current) {
@@ -227,63 +264,17 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     if (c) {
       c.scrollTop = c.scrollHeight;
     } else {
-      // Fallback
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
   };
-
-  const addDebugLog = () => {}; // No-op after removal
-
-  // TODO: Edit and delete message handlers (Features temporarily disabled)
-  /*
-  const handleEditMessage = async (message) => {
-    const newContent = prompt('Edit your message:', message.text);
-    if (newContent && newContent.trim() !== message.text) {
-      try {
-        addDebugLog('Editing message', {
-          messageId: message.id,
-          oldLength: message.text.length,
-          newLength: newContent.length
-        });
-
-        // Send edit request using socket service
-        socketService.editMessage(message.id, newContent.trim(), roomId);
-
-      } catch (error) {
-        console.error('Error editing message:', error);
-        addDebugLog('Edit message error', error.message);
-      }
-    }
-  };
-
-  const handleDeleteMessage = async (message) => {
-    if (window.confirm('Are you sure you want to delete this message?')) {
-      try {
-        addDebugLog('Deleting message', {
-          messageId: message.id,
-          contentLength: message.text.length
-        });
-
-        // Send delete request using socket service
-        socketService.deleteMessage(message.id, roomId);
-
-      } catch (error) {
-        console.error('Error deleting message:', error);
-        addDebugLog('Delete message error', error.message);
-      }
-    }
-  };
-  */
 
   const handleClearChat = () => {
     if (!window.confirm(`Are you sure you want to clear all messages with ${selectedUser.username}? This action cannot be undone.`)) {
       return;
     }
 
-    // Clear messages from local state
     setMessages([]);
     
-    // Add a system message to indicate chat was cleared
     const clearMessage = {
       id: `clear_${Date.now()}`,
       text: '🧹 Chat cleared by you',
@@ -321,17 +312,14 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
       });
 
       socketService.sendMessage(selectedUser.id, messageText, roomId);
-      
-      // Stop typing indicator
       socketService.stopTyping(roomId);
       
     } catch (error) {
       console.error('Error sending message:', error);
       addDebugLog('Send message error', error.message);
-      setNewMessage(messageText); // Restore message on error
+      setNewMessage(messageText);
     } finally {
       setLoading(false);
-      // Keep focus for rapid messaging (avoid on mobile to prevent layout jump)
       const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
       if (!isMobile) {
         inputRef.current?.focus();
@@ -342,18 +330,15 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
   const handleInputChange = (e) => {
     setNewMessage(e.target.value);
     
-    // Handle typing indicators
     if (e.target.value.trim() && !isTyping) {
       setIsTyping(true);
       socketService.startTyping(roomId);
     }
     
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    // Set new timeout to stop typing
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
       socketService.stopTyping(roomId);
@@ -364,8 +349,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
-
-  // Debug timestamp formatting removed
 
   if (!selectedUser) {
     return (
@@ -396,7 +379,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
         <div style={{ flex: 1 }}>
           <h3>Chat with {selectedUser.username}</h3>
           <div className="encryption-status">
-            Secure tunnel established {roomId && `(Room: ${roomId.slice(0, 8)}...)`}
+            🔒 Secure tunnel established {roomId && `(Room: ${roomId.slice(0, 8)}...)`}
           </div>
         </div>
         <button 
@@ -421,7 +404,7 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
         {messages.length === 0 ? (
           <div className="empty-state">
             <h3>Start your secure conversation</h3>
-            <p>Messages are encrypted with custom lightweight algorithm</p>
+            <p>Messages are encrypted with KrishnaGuard-128-CBC</p>
           </div>
         ) : (
           messages.map((message) => (
@@ -461,7 +444,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                     )}
                   </div>
                   
-                  {/* Message metadata */}
                   <div className="message-meta">
                     {message.metadata?.edited && (
                       <span className="edited-indicator" style={{ 
@@ -473,7 +455,6 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
                       </span>
                     )}
                     
-                    {/* Message status indicators */}
                     {message.isOwn && (
                       <span className="message-status" style={{ 
                         fontSize: '10px', 
@@ -571,6 +552,14 @@ const Chat = ({ currentUser, selectedUser, onBack }) => {
           </button>
         </form>
       </div>
+      
+      {/* ✅ DebugPanel Component */}
+      <DebugPanel
+        logs={debugLogs}
+        onClear={handleClearDebugLogs}
+        visible={debugVisible}
+        onToggle={toggleDebugPanel}
+      />
     </div>
   );
 };
