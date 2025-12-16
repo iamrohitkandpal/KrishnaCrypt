@@ -47,10 +47,9 @@ const DebugPanel = ({ logs = [], onClear, visible = false, onToggle }) => {
   return (
     <>
       <button 
-        className="debug-toggle"
+        className="debug-toggle debug-toggle--active"
         onClick={onToggle}
         title="Hide debug panel"
-        style={{ background: '#28a745' }}
       >
         ✕
       </button>

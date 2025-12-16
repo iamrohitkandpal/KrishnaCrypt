@@ -913,16 +913,28 @@ body::before {
 
 .debug-panel {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 400px;
-  max-height: 300px;
-  background: rgba(13, 17, 23, 0.95);
-  border: 2px solid #ffff00;
+  bottom: 80px;
+  left: 20px;
+  width: 500px;
+  max-height: 550px;
+  background: rgba(13, 17, 23, 0.98);
+  border: 2px solid rgba(0, 255, 65, 0.6);
   border-radius: 12px;
-  box-shadow: 0 0 20px rgba(255, 255, 0, 0.3);
-  z-index: 1000;
+  padding: 1rem;
+  z-index: 999;
   backdrop-filter: blur(10px);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(0, 255, 65, 0.15);
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+}
+
+.debug-panel h4 {
+  color: #00ff41;
+  font-size: 0.875rem;
+  margin: 0;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
 }
 
 .debug-header {
@@ -941,23 +953,42 @@ body::before {
 }
 
 .debug-toggle {
-  background: none;
-  border: 1px solid #ffff00;
-  color: #ffff00;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #21262d, #161b22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  font-size: 0.75rem;
+  border: 2px solid rgba(0, 255, 65, 0.5);
+  color: #00ff41;
+  z-index: 1000;
   transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
 }
 
 .debug-toggle:hover {
-  background: rgba(255, 255, 0, 0.1);
+  border-color: #00ff41;
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.4);
+  transform: scale(1.1);
+}
+
+.debug-toggle--active {
+  background: linear-gradient(135deg, #28a745, #218838) !important;
+  border-color: #28a745;
+}
+
+.debug-toggle--active:hover {
+  box-shadow: 0 0 20px rgba(40, 167, 69, 0.5);
 }
 
 .debug-content {
   padding: 1rem;
-  max-height: 200px;
+  max-height: 450px;
   overflow-y: auto;
 }
 
